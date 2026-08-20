@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: IranOpen-InSitu_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - IranOpen-InSitu_pgdata:/var/lib/postgresql/data
+    networks:
+      - IranOpen-InSitu_net
+    # No "ports:" here on purpose — Postgres is only reachable from the
+    # app container over the internal IranOpen-InSitu_net network, never from
+    # the host or other apps.
+
+  app:
+    image: ghcr.io/parsasamiei/IranOpen-InSitu-scs-app:latest
+    container_name: IranOpen-InSitu_app
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      AUTH_SECRET: ${AUTH_SECRET}
+      BOOTSTRAP_SUPERADMIN_USERNAME: ${BOOTSTRAP_SUPERADMIN_USERNAME}
+      BOOTSTRAP_SUPERADMIN_PASSWORD: ${BOOTSTRAP_SUPERADMIN_PASSWORD}
+    ports:
+      # Bound to localhost only — nginx on the host proxies to it.
+      # Other apps' ports are untouched, and this port isn't reachable
+      # from outside the server at all.
+      - "127.0.0.1:4000:4000"
+    networks:
+      - IranOpen-InSitu_net
+
+networks:
+  IranOpen-InSitu_net:
+    name: IranOpen-InSitu_net
+
+volumes:
+  IranOpen-InSitu_pgdata:
+    name: IranOpen-InSitu_pgdata
