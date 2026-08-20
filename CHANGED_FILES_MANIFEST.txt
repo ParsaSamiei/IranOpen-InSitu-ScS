@@ -1,0 +1,56 @@
+IranOpen-InSitu ScS App — v2 migration changed files
+==============================================
+
+This archive contains ONLY the files that changed, in their new/final state,
+preserving their original repo-relative paths. Copy them over your existing
+checkout to apply the changes (or use the accompanying .patch file instead,
+which also records deletions/renames properly).
+
+One file was DELETED and is NOT included here (nothing to copy):
+  - api/scoringConfig.js   (replaced by api/rulesEngine.js, which IS included)
+
+All other files below are either modified or newly added:
+.env.example
+DEPLOY.md
+README.md
+api/auth.js
+api/constants.js
+api/db.js
+api/helpers/scoreQueries.js
+api/index.js
+api/routes/exportRoutes.js
+api/routes/publicRoutes.js
+api/routes/roundRoutes.js
+api/routes/scoreRoutes.js
+api/routes/settingsRoutes.js
+api/routes/teamRoutes.js
+api/routes/userRoutes.js
+api/rulesEngine.js
+client/index.html
+client/package-lock.json
+client/package.json
+client/src/App.jsx
+client/src/Login.jsx
+client/src/ScoreForm.jsx
+client/src/api.js
+client/src/components/ScoreRecordModal.jsx
+client/src/constants.js
+client/src/hooks/useAsync.js
+client/src/index.css
+client/src/layouts/AdminLayout.jsx
+client/src/layouts/PublicLayout.jsx
+client/src/public/PublicHistory.jsx
+client/src/public/PublicLeaderboard.jsx
+client/src/scoreCalc.js
+client/src/tabs/ExportTab.jsx
+client/src/tabs/HistoryTab.jsx
+client/src/tabs/LeaderboardTab.jsx
+client/src/tabs/RulesTab.jsx
+client/src/tabs/ScoreEntryTab.jsx
+client/src/tabs/SettingsTab.jsx
+client/src/tabs/TeamsTab.jsx
+client/src/tabs/UsersTab.jsx
+deploy/.env.example
+deploy/docker-compose.yml
+package-lock.json
+package.json

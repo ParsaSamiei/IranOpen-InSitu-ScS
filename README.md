@@ -4,7 +4,7 @@
 
 ### Scoring & Standings System for IranOpen InSitu
 
-**Built for [IranOpen-InSitu](https://github.com/ParsaSamiei), the RoboCup-style robotics competition hosted by Pishanam Robotics Academy**
+**Built for [IranOpen-InSitu](https://github.com/ParsaSamiei), the RoboCup-style robotics competition**
 
 [![Made with React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB?logo=react&logoColor=white)](https://react.dev)
 [![Made with Node](https://img.shields.io/badge/Backend-Node.js%20%2B%20Express-339933?logo=node.js&logoColor=white)](https://nodejs.org)
@@ -184,7 +184,8 @@ Generate a full results workbook on demand from the Export tab — one sheet per
 
 ## 🤝 Contributing
 
-Built and maintained for **IranOpen-InSitu**, by **Pishanam Robotics Academy**. Found a bug or have an idea? Open an issue — contributions are welcome.
+Built and maintained for **IranOpen-InSitu**.
+Found a bug or have an idea? Open an issue — contributions are welcome.
 
 ## 📄 License
 

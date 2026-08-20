@@ -117,8 +117,8 @@ function EditUserRow({ user, onSaved }) {
           {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
       </td>
-      <td className="row-actions">
-        <input type="password" placeholder="رمز جدید (اختیاری)" value={password} onChange={(e) => setPassword(e.target.value)} style={{ width: 130 }} />
+      <td className="row-actions user-edit-actions">
+        <input type="password" placeholder="رمز جدید (اختیاری)" value={password} onChange={(e) => setPassword(e.target.value)} className="user-edit-password" />
         <button className="link" disabled={saving} onClick={save}>ذخیره</button>
         <button className="link" disabled={saving} onClick={() => setEditing(false)}>انصراف</button>
         {error && <span className="error">{error}</span>}
@@ -138,6 +138,7 @@ export default function UsersTab() {
       {loading && <p>در حال بارگذاری...</p>}
       {error && <p className="error">{error}</p>}
 
+      <div className="table-scroll">
       <table className="score-table user-table">
         <thead>
           <tr><th>نام کاربری</th><th>نام نمایشی</th><th>نقش</th><th></th></tr>
@@ -147,6 +148,7 @@ export default function UsersTab() {
           {(users || []).length === 0 && !loading && <tr><td colSpan={4} className="muted">کاربری ثبت نشده</td></tr>}
         </tbody>
       </table>
+      </div>
 
       {adding ? (
         <UserForm onCancel={() => setAdding(false)} onSubmit={async (payload) => { await api.createUser(payload); setAdding(false); reload(); }} />

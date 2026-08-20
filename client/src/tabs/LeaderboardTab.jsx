@@ -18,6 +18,7 @@ export default function LeaderboardTab() {
       {loading && <p>در حال بارگذاری...</p>}
       {error && <p className="error">{error}</p>}
 
+      <div className="table-scroll">
       <table className="score-table">
         <thead>
           <tr><th>رتبه</th><th>تیم</th><th>بهترین امتیاز</th><th>زمان بهترین راند</th><th>تعداد راندها</th></tr>
@@ -37,6 +38,7 @@ export default function LeaderboardTab() {
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

@@ -17,12 +17,19 @@ import RulesTab from './tabs/RulesTab.jsx';
 import UsersTab from './tabs/UsersTab.jsx';
 import SettingsTab from './tabs/SettingsTab.jsx';
 
-// Redirects to /admin/login (and back again on success) when the session
-// expires mid-use — api.js dispatches this on any 401 response.
+// Redirects to /admin/login when the session expires mid-use inside the
+// admin panel — api.js dispatches this on any 401 response. Scoped to /admin
+// paths so a request made from the public site (which should never need
+// auth) can't accidentally hijack navigation away from what the visitor was
+// looking at.
 function AuthWatcher() {
   const navigate = useNavigate();
   useEffect(() => {
-    const onLogout = () => navigate('/admin/login', { replace: true });
+    const onLogout = () => {
+      if (window.location.pathname.startsWith('/admin')) {
+        navigate('/admin/login', { replace: true });
+      }
+    };
     window.addEventListener('auth:logout', onLogout);
     return () => window.removeEventListener('auth:logout', onLogout);
   }, [navigate]);

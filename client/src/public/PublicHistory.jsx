@@ -30,6 +30,7 @@ export default function PublicHistory() {
 
       {loading && <p>در حال بارگذاری...</p>}
 
+      <div className="table-scroll">
       <table className="score-table">
         <thead>
           <tr><th>تیم</th><th>راند</th><th>زمان</th><th>امتیاز نهایی</th><th></th></tr>
@@ -51,6 +52,7 @@ export default function PublicHistory() {
           )}
         </tbody>
       </table>
+      </div>
 
       {record && (
         <ScoreRecordModal mode="view" record={record} publicMode onClose={() => setRecord(null)} />

@@ -8,7 +8,10 @@ import { formatRoundTime, roundTimeToSeconds, ScoreNum } from '../formatScore.js
 // entirely, regardless of `mode` (used by the public history page).
 export default function ScoreRecordModal({ mode, record, onClose, onSaved, publicMode }) {
   const readOnly = mode === 'view' || publicMode;
-  const [{ data: rules, loading }] = useAsync(() => api.getRoundRules(record.round_id), [record.round_id]);
+  const [{ data: rules, loading }] = useAsync(
+    () => (publicMode ? api.getPublicRoundRules(record.round_id) : api.getRoundRules(record.round_id)),
+    [record.round_id, publicMode]
+  );
 
   const [values, setValues] = useState(record.values_json || {});
   const [judgeName, setJudgeName] = useState(record.judge_name || '');

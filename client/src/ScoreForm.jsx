@@ -106,6 +106,7 @@ function Section({ section, index, values, onChange, readOnly }) {
   return (
     <div className={`sheet-section tone-${tone}`}>
       <div className="section-band">{section.label}</div>
+      <div className="table-scroll">
       <table className="sheet-table">
         <thead>
           <tr>
@@ -137,6 +138,7 @@ function Section({ section, index, values, onChange, readOnly }) {
           </tr>
         </tfoot>
       </table>
+      </div>
     </div>
   );
 }

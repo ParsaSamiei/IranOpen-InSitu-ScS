@@ -87,6 +87,7 @@ export const api = {
   getPublicTeams: (league) => req("/public/teams" + qs({ league })),
   getPublicLeaderboard: (league) => req("/public/leaderboard" + qs({ league })),
   getPublicHistory: (params = {}) => req("/public/history" + qs(params)),
+  getPublicRoundRules: (id) => req(`/public/rounds/${id}/sections`),
 
   // ---------- Teams ----------
   getTeams: (league) => req("/teams" + qs({ league })),

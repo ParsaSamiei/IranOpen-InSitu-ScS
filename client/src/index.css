@@ -733,6 +733,11 @@ button:disabled {
 .record-modal-meta .time-inputs {
   height: 36px;
 }
+@media (max-width: 480px) {
+  .record-modal-meta label:has(.time-inputs) {
+    grid-column: 1 / -1;
+  }
+}
 
 /* ---------- the scoring sheet itself ---------- */
 
@@ -989,6 +994,18 @@ button:disabled {
 
 /* ---------- report tables (history / leaderboard) ---------- */
 
+/* Wraps every .score-table usage so a wide table (or, on a narrow screen, a
+   row temporarily widened by inline-edit inputs) scrolls within its own box
+   instead of forcing the whole page to overflow horizontally. */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll .score-table {
+  margin-top: 0;
+}
+
 .score-table {
   width: 100%;
   border-collapse: collapse;
@@ -1203,6 +1220,31 @@ button:disabled {
 @media (max-width: 480px) {
   .entry-controls {
     grid-template-columns: minmax(0, 1fr);
+  }
+  main {
+    padding: 16px 12px 40px;
+  }
+  .tab-content {
+    padding: 16px;
+  }
+  .confirm-card {
+    padding: 18px;
+  }
+  .confirm-actions {
+    margin: 0 -18px -18px;
+    padding: 12px 18px;
+    bottom: -18px;
+  }
+  .card {
+    padding: 14px;
+  }
+  .score-table th,
+  .score-table td {
+    padding: 7px 6px;
+    font-size: 12px;
+  }
+  .record-modal-meta {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   }
 }
 
@@ -1432,6 +1474,13 @@ button:disabled {
 .user-table .role-tag--super {
   background: #fff2cf;
   color: #7a5c0a;
+}
+.user-edit-actions {
+  flex-wrap: wrap;
+}
+.user-edit-password {
+  width: 130px;
+  max-width: 100%;
 }
 
 /* ---------- Settings tab ---------- */

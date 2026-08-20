@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { listScores, leaderboard } = require('../helpers/scoreQueries');
+const { loadRoundRules } = require('../rulesEngine');
 
 const router = express.Router();
 
@@ -45,4 +46,17 @@ router.get('/history', async (req, res) => {
   }
 });
 
+// A round's sections/items (the same shape the admin rule builder and score
+// form use) so the public history "نمایش" modal can render a record's
+// breakdown without needing to hit an authenticated route.
+router.get('/rounds/:id/sections', async (req, res) => {
+  try {
+    const { round, sections } = await loadRoundRules(req.params.id);
+    res.json({ round, sections });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'خطا در بارگذاری قوانین راند' });
+  }
+});
+
 module.exports = router;
+

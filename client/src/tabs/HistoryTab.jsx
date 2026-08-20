@@ -25,6 +25,7 @@ export default function HistoryTab() {
 
       {loading && <p>در حال بارگذاری...</p>}
 
+      <div className="table-scroll">
       <table className="score-table">
         <thead>
           <tr>
@@ -51,6 +52,7 @@ export default function HistoryTab() {
           )}
         </tbody>
       </table>
+      </div>
 
       {modal && (
         <ScoreRecordModal
