@@ -194,6 +194,6 @@ This project is licensed under the **MIT License** — see [`LICENSE`](./LICENSE
 
 <div align="center">
 
-Made with 🤖 for **IranOpen-InSitu** · Pishnam Robotics Academy
+Made with 🤖 for **IranOpen-InSitu**
 
 </div>
