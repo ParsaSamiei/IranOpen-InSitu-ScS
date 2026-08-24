@@ -8,11 +8,23 @@ permissions:
   contents: read
   packages: write
 
+env:
+  IMAGE: ghcr.io/parsasamiei/iranopen-insitu-scs-app
+
+# The VPS cannot reach ghcr.io — the network drops the TLS handshake when SNI
+# is "ghcr.io" (the IP itself is open, and the same IP serves the registry
+# cert under a different SNI). So the image is streamed to the server over the
+# SSH connection we already have, and the registry is only an archive.
+# Build and ship must live in ONE job so `docker save` sees the image that
+# `docker build` just produced in this runner's daemon.
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -21,40 +33,87 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push image
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          load: true
           tags: |
-            ghcr.io/parsasamiei/iranopen-insitu-scs-app:latest
-            ghcr.io/parsasamiei/iranopen-insitu-scs-app:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
+      # Archive only. Never on the delivery path, so a registry hiccup must
+      # not fail the deploy.
+      - name: Push to GHCR (archive)
+        continue-on-error: true
+        run: |
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:${{ github.sha }}"
+
+      - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          echo "SSH_OPTS=-i $HOME/.ssh/deploy_key -p $SSH_PORT -o ServerAliveInterval=30 -o ServerAliveCountMax=10" >> "$GITHUB_ENV"
+
+      # Tag whatever is running now as :previous so the health check below has
+      # something to roll back to, and so `image prune` can't reclaim it.
+      - name: Mark rollback point
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" '
+            running=$(docker inspect --format "{{.Image}}" iranopen-insitu_app 2>/dev/null || true)
+            if [ -n "$running" ]; then
+              docker tag "$running" iranopen-insitu-scs-app:previous
+              echo "rollback point: $running"
+            else
+              echo "no running container — first deploy, nothing to roll back to"
+            fi'
+
+      - name: Ship image over SSH
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          docker save "$IMAGE:latest" "$IMAGE:${{ github.sha }}" \
+            | gzip -9 \
+            | ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'gunzip | docker load'
+
+      - name: Restart and health-check
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" '
+            set -e
             cd /opt/iranopen-insitu
-            success=false
-            for i in 1 2 3 4 5 6 7 8; do
-              if docker compose pull app; then
-                success=true
-                break
-              fi
-              echo "pull attempt $i failed, retrying..."
-              sleep $((i * 5))
-            done
-            if [ "$success" = false ]; then
-              echo "::error::Failed to pull new image after 8 attempts — aborting, still running previous version"
-              exit 1
-            fi
             docker compose up -d app
-            docker image prune -f
+
+            for i in $(seq 1 20); do
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:4000/ || echo 000)
+              if [ "$code" = "200" ]; then
+                echo "healthy after ${i} attempt(s)"
+                docker image prune -f
+                exit 0
+              fi
+              echo "health attempt $i: HTTP $code"
+              sleep 3
+            done
+
+            echo "::error::new image failed health check — rolling back"
+            if docker image inspect iranopen-insitu-scs-app:previous >/dev/null 2>&1; then
+              docker tag iranopen-insitu-scs-app:previous '"$IMAGE"':latest
+              docker compose up -d app
+              echo "rolled back to previous image"
+            fi
+            exit 1'

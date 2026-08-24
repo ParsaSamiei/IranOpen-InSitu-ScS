@@ -8,9 +8,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - IranOpen-InSitu_pgdata:/var/lib/postgresql/data
+      - iranopen-insitu_pgdata:/var/lib/postgresql/data
     networks:
-      - IranOpen-InSitu_net
+      - iranopen-insitu_net
     # No "ports:" here on purpose — Postgres is only reachable from the
     # app container over the internal IranOpen-InSitu_net network, never from
     # the host or other apps.
@@ -36,7 +36,7 @@ services:
       - iranopen-insitu_net
 
 networks:
-  iranOpen-InSitu_net:
+  iranopen-insitu_net:
     name: iranopen-insitu_net
 
 volumes:
