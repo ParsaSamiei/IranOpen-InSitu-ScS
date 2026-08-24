@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: IranOpen-InSitu_db
+    container_name: iranopen-insitu_db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -16,8 +16,8 @@ services:
     # the host or other apps.
 
   app:
-    image: ghcr.io/parsasamiei/IranOpen-InSitu-scs-app:latest
-    container_name: IranOpen-InSitu_app
+    image: ghcr.io/parsasamiei/iranopen-insitu-scs-app:latest
+    container_name: iranopen-insitu_app
     restart: unless-stopped
     depends_on:
       - db
@@ -33,12 +33,12 @@ services:
       # from outside the server at all.
       - "127.0.0.1:4000:4000"
     networks:
-      - IranOpen-InSitu_net
+      - iranopen-insitu_net
 
 networks:
-  IranOpen-InSitu_net:
-    name: IranOpen-InSitu_net
+  iranOpen-InSitu_net:
+    name: iranopen-insitu_net
 
 volumes:
-  IranOpen-InSitu_pgdata:
-    name: IranOpen-InSitu_pgdata
+  iranopen-insitu_pgdata:
+    name: iranopen-insitu_pgdata

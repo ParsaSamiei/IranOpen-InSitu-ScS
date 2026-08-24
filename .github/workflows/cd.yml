@@ -27,8 +27,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/parsasamiei/IranOpen-InSitu-scs-app:latest
-            ghcr.io/parsasamiei/IranOpen-InSitu-scs-app:${{ github.sha }}
+            ghcr.io/parsasamiei/iranopen-insitu-scs-app:latest
+            ghcr.io/parsasamiei/iranopen-insitu-scs-app:${{ github.sha }}
 
   deploy:
     needs: build-and-push
@@ -42,7 +42,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script: |
-            cd /opt/IranOpen-InSitu
+            cd /opt/iranopen-insitu
             docker compose pull app
             docker compose up -d app
             docker image prune -f
