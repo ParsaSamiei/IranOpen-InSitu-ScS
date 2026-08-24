@@ -43,6 +43,6 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             cd /opt/iranopen-insitu
-            docker compose pull app
+            for i in 1 2 3 4 5; do docker compose pull app && break || sleep 10; done
             docker compose up -d app
             docker image prune -f
