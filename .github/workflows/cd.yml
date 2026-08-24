@@ -43,6 +43,18 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             cd /opt/iranopen-insitu
-            for i in 1 2 3 4 5; do docker compose pull app && break || sleep 10; done
+            success=false
+            for i in 1 2 3 4 5 6 7 8; do
+              if docker compose pull app; then
+                success=true
+                break
+              fi
+              echo "pull attempt $i failed, retrying..."
+              sleep $((i * 5))
+            done
+            if [ "$success" = false ]; then
+              echo "::error::Failed to pull new image after 8 attempts — aborting, still running previous version"
+              exit 1
+            fi
             docker compose up -d app
             docker image prune -f
