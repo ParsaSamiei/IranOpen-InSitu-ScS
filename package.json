@@ -11,6 +11,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.19.2",
+    "express-rate-limit": "^8.6.2",
     "pg": "^8.13.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }

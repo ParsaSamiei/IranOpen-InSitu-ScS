@@ -98,6 +98,8 @@ BOOTSTRAP_SUPERADMIN_PASSWORD=<a strong password>
 
 The first time the API starts with no `super_admin` account in the database, it creates one from `BOOTSTRAP_SUPERADMIN_USERNAME`/`BOOTSTRAP_SUPERADMIN_PASSWORD` — after that, manage further accounts from the Users tab.
 
+`POST /api/login` is rate limited on **failed** attempts only: 30 per client IP and 8 per username in a 10-minute window, and a successful login clears that username's counter. Override with `LOGIN_RATE_LIMIT_WINDOW_MS`, `LOGIN_RATE_LIMIT_MAX_PER_IP`, `LOGIN_RATE_LIMIT_MAX_PER_USER` (set a max to `0` to disable that limiter). Keep the per-IP cap generous — a whole venue behind one NAT shares a single IP, so the per-username limit is what actually stops brute force. If the app runs behind a reverse proxy other than the documented single nginx hop, set `TRUST_PROXY` to the number of proxies (`0` if it's exposed directly), otherwise the per-IP limit keys on the proxy's address instead of the real client's.
+
 ### 2️⃣ Start the backend
 
 ```bash

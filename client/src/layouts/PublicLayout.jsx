@@ -30,9 +30,9 @@ export default function PublicLayout() {
               )}
             </div>
           </div>
-          <NavLink to="/admin/login" className="logout-btn public-nav-link">
-            ورود مسئولین
-          </NavLink>
+          {/* No login link here on purpose — the public site shouldn't
+              advertise the admin entrance. Judges and organizers reach it by
+              going to /admin/login directly; the route itself is unchanged. */}
         </div>
       </header>
       <nav className="tabs" aria-label="ناوبری اصلی">

@@ -10,6 +10,7 @@ const express = require('express');
 const cors = require('cors');
 const { initDb } = require('./db');
 const { createToken, validateCredentials, authMiddleware, getSecret } = require('./auth');
+const { loginIpLimiter, loginUsernameLimiter, resetUsername } = require('./rateLimit');
 
 const publicRoutes = require('./routes/publicRoutes');
 const teamRoutes = require('./routes/teamRoutes');
@@ -20,6 +21,27 @@ const settingsRoutes = require('./routes/settingsRoutes');
 const exportRoutes = require('./routes/exportRoutes');
 
 const app = express();
+
+// In production this runs behind nginx on the host (deploy/nginx-pishcup.conf
+// proxies to 127.0.0.1:4000), so without this every request would look like it
+// came from the proxy's address — and the per-IP login limiter would treat the
+// entire venue as a single client. Trusting exactly ONE hop makes req.ip the
+// last entry nginx appended to X-Forwarded-For, i.e. the address nginx really
+// saw, so a client can't pick its own key by sending an X-Forwarded-For header
+// of its own. Set TRUST_PROXY=0 if the app is ever exposed directly with no
+// proxy in front, or to the number of proxies if you add more.
+app.set('trust proxy', (() => {
+  const raw = process.env.TRUST_PROXY;
+  if (raw == null || raw === '') return 1;
+  if (raw === 'false') return false;
+  const hops = Number(raw);
+  if (!Number.isInteger(hops) || hops < 0) {
+    console.warn(`WARNING: TRUST_PROXY="${raw}" is not a non-negative integer — falling back to 1.`);
+    return 1;
+  }
+  return hops;
+})());
+
 app.use(cors());
 app.use(express.json({ limit: '5mb' })); // captain signatures are base64 PNG data URLs
 
@@ -44,7 +66,10 @@ app.use(async (req, res, next) => {
 app.use('/api/public', publicRoutes);
 
 // ---------- Auth ----------
-app.post('/api/login', async (req, res) => {
+// Rate limited twice over: per-IP first (cheap, stops a single host hammering
+// the endpoint), then per-username (follows the targeted account even if the
+// attacker rotates IPs). Both count failures only — see api/rateLimit.js.
+app.post('/api/login', loginIpLimiter, loginUsernameLimiter, async (req, res) => {
   const { username, password } = req.body || {};
   if (!getSecret()) {
     return res.status(503).json({ error: 'احراز هویت پیکربندی نشده است' });
@@ -53,6 +78,10 @@ app.post('/api/login', async (req, res) => {
   if (!user) {
     return res.status(401).json({ error: 'نام کاربری یا رمز عبور اشتباه است' });
   }
+  // Correct password proves the earlier failures on this username weren't an
+  // attack on it, so clear its counter instead of leaving a judge who mistyped
+  // a few times one typo away from a lockout.
+  resetUsername(username);
   res.json({ token: createToken(user), user: { id: user.id, username: user.username, display_name: user.display_name, role: user.role } });
 });
 

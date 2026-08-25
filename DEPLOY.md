@@ -125,6 +125,8 @@ BOOTSTRAP_SUPERADMIN_PASSWORD=<a strong password for the first Super Admin accou
 
 `.env` never gets committed to git — it only lives on the server.
 
+Login attempts are rate limited out of the box (failed attempts only: 30 per IP, 8 per username, per 10 minutes; a successful login clears that username's counter). To tune it, add `LOGIN_RATE_LIMIT_MAX_PER_IP` / `LOGIN_RATE_LIMIT_MAX_PER_USER` / `LOGIN_RATE_LIMIT_WINDOW_MS` to this `.env` and re-run `docker compose up -d` — `docker-compose.yml` already passes them through. Note the venue caveat: judges sharing one public IP all draw from the same per-IP budget, so raise that one (or set it to `0` to disable it) rather than the per-username one if judges get locked out mid-competition. The counters live in the app process's memory, so restarting the container clears them — which is also the quickest way to unblock everyone at once.
+
 ---
 
 ## Part C — nginx + domain (doesn't touch your other sites)

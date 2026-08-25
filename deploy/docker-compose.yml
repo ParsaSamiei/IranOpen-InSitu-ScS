@@ -27,6 +27,12 @@ services:
       AUTH_SECRET: ${AUTH_SECRET}
       BOOTSTRAP_SUPERADMIN_USERNAME: ${BOOTSTRAP_SUPERADMIN_USERNAME}
       BOOTSTRAP_SUPERADMIN_PASSWORD: ${BOOTSTRAP_SUPERADMIN_PASSWORD}
+      # Login rate limiting. Left empty unless set in .env, in which case the
+      # app falls back to its built-in defaults (10min / 30 per IP / 8 per
+      # username, failed attempts only).
+      LOGIN_RATE_LIMIT_WINDOW_MS: ${LOGIN_RATE_LIMIT_WINDOW_MS:-}
+      LOGIN_RATE_LIMIT_MAX_PER_IP: ${LOGIN_RATE_LIMIT_MAX_PER_IP:-}
+      LOGIN_RATE_LIMIT_MAX_PER_USER: ${LOGIN_RATE_LIMIT_MAX_PER_USER:-}
     ports:
       # Bound to localhost only — nginx on the host proxies to it.
       # Other apps' ports are untouched, and this port isn't reachable
