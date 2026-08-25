@@ -1033,6 +1033,13 @@ button:disabled {
   background: var(--accent-soft);
 }
 
+/* Small raw-score / time line under a round's normalized score in the
+   standings table. */
+.leaderboard-round-sub {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
 .app-loading,
 .app-error {
   padding: 60px 20px;

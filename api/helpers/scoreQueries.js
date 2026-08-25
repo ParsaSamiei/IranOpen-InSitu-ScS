@@ -29,34 +29,124 @@ async function listScores({ team_id, round_id, league, includeJudge }) {
   }));
 }
 
-// Best round per team (by final_total, tie-broken by lower time), same logic
-// as the original single-league version — league filtering now goes through
-// teams.league instead of a league column on score_entries directly.
+// Standings, per the new scoring rules:
+//   - every round a team has played is shown, not just their best one
+//   - ranking is by the TOTAL of each round's NORMALIZED score (best score in
+//     that round = 100, everyone else scaled proportionally against it),
+//     not by a single best round
+//   - a round the team hasn't played yet counts as 0 toward the total (per
+//     product decision), so it still shows up as a column/entry with
+//     played:false
+//   - ties on total normalized score are broken by the team's summed round
+//     time (lower = better, missing times count as 0), then by name
+//
+// If a team has more than one score_entries row for the same round (e.g. a
+// re-judged sheet), the most recently updated one is treated as that round's
+// authoritative score — the same "latest wins" idea the edit flow relies on.
 async function leaderboard({ league }) {
-  let sql = `
-    WITH best_rounds AS (
-      SELECT DISTINCT ON (s.team_id)
-        s.team_id, s.final_total, s.round_time_seconds
-      FROM score_entries s
-      ORDER BY s.team_id, s.final_total DESC, s.round_time_seconds ASC NULLS LAST, s.id ASC
-    )
-    SELECT t.id AS team_id, t.name AS team_name, t.league,
-           br.final_total AS best_score,
-           br.round_time_seconds AS best_time_seconds,
-           COUNT(s.id) AS rounds_played
-    FROM teams t
-    LEFT JOIN best_rounds br ON br.team_id = t.id
-    LEFT JOIN score_entries s ON s.team_id = t.id
-  `;
-  const params = [];
-  if (league) { params.push(league); sql += ` WHERE t.league = $${params.length}`; }
-  sql += `
-    GROUP BY t.id, t.name, t.league, br.final_total, br.round_time_seconds
-    ORDER BY (br.final_total IS NULL), br.final_total DESC NULLS LAST, br.round_time_seconds ASC NULLS LAST, t.name ASC
-  `;
+  const teamParams = [];
+  let teamSql = 'SELECT id, name, league FROM teams';
+  if (league) { teamParams.push(league); teamSql += ' WHERE league = $1'; }
+  teamSql += ' ORDER BY league, name';
+  const { rows: teams } = await pool.query(teamSql, teamParams);
+  if (teams.length === 0) return [];
 
-  const { rows } = await pool.query(sql, params);
-  return rows;
+  const leagues = [...new Set(teams.map((t) => t.league))];
+
+  const { rows: rounds } = await pool.query(
+    `SELECT id, league, round_number, label, sort_order
+     FROM rounds WHERE league = ANY($1)
+     ORDER BY sort_order, round_number`,
+    [leagues]
+  );
+
+  const { rows: entries } = await pool.query(
+    `
+    WITH latest_entries AS (
+      SELECT DISTINCT ON (s.team_id, s.round_id)
+        s.team_id, s.round_id, s.final_total, s.round_time_seconds
+      FROM score_entries s
+      JOIN rounds r ON r.id = s.round_id
+      WHERE r.league = ANY($1)
+      ORDER BY s.team_id, s.round_id, s.updated_at DESC, s.id DESC
+    ),
+    round_best AS (
+      SELECT round_id, MAX(final_total) AS best_score
+      FROM latest_entries
+      GROUP BY round_id
+    )
+    SELECT le.team_id, le.round_id, le.final_total AS raw_score, le.round_time_seconds,
+           CASE WHEN rb.best_score > 0
+                THEN ROUND((le.final_total / rb.best_score * 100)::numeric, 2)
+                ELSE 0 END AS normalized_score
+    FROM latest_entries le
+    JOIN round_best rb ON rb.round_id = le.round_id
+    `,
+    [leagues]
+  );
+
+  const entryMap = new Map();
+  for (const e of entries) entryMap.set(`${e.team_id}:${e.round_id}`, e);
+
+  const roundsByLeague = new Map();
+  for (const r of rounds) {
+    if (!roundsByLeague.has(r.league)) roundsByLeague.set(r.league, []);
+    roundsByLeague.get(r.league).push(r);
+  }
+
+  const result = teams.map((t) => {
+    const teamRounds = roundsByLeague.get(t.league) || [];
+    let total_normalized = 0;
+    let total_time_seconds = 0;
+    let rounds_played = 0;
+
+    const roundResults = teamRounds.map((r) => {
+      const e = entryMap.get(`${t.id}:${r.id}`);
+      if (!e) {
+        return {
+          round_id: r.id,
+          round_number: r.round_number,
+          round_label: r.label,
+          played: false,
+          raw_score: null,
+          normalized_score: 0,
+          round_time_seconds: null,
+        };
+      }
+      const normalized = Number(e.normalized_score);
+      rounds_played += 1;
+      total_normalized += normalized;
+      total_time_seconds += Number(e.round_time_seconds) || 0;
+      return {
+        round_id: r.id,
+        round_number: r.round_number,
+        round_label: r.label,
+        played: true,
+        raw_score: e.raw_score,
+        normalized_score: normalized,
+        round_time_seconds: e.round_time_seconds,
+      };
+    });
+
+    return {
+      team_id: t.id,
+      team_name: t.name,
+      league: t.league,
+      rounds: roundResults,
+      total_rounds: teamRounds.length,
+      rounds_played,
+      total_normalized: Math.round(total_normalized * 100) / 100,
+      total_time_seconds,
+    };
+  });
+
+  result.sort((a, b) => (
+    b.total_normalized - a.total_normalized
+    || a.total_time_seconds - b.total_time_seconds
+    || a.team_name.localeCompare(b.team_name, 'fa')
+  ));
+
+  return result;
 }
 
 module.exports = { listScores, leaderboard };

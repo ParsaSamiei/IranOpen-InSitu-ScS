@@ -103,12 +103,18 @@ router.get("/", async (req, res) => {
       }
 
       const lbRows = await leaderboard({ league: lg });
-      const lbSheetRows = lbRows.map((r) => ({
-        تیم: r.team_name,
-        "بهترین امتیاز": r.best_score,
-        "زمان بهترین راند (ثانیه)": r.best_time_seconds,
-        "تعداد راندها": r.rounds_played,
-      }));
+      const lbSheetRows = lbRows.map((r) => {
+        const row = { تیم: r.team_name };
+        for (const rd of r.rounds) {
+          const label = rd.round_label || `راند ${rd.round_number}`;
+          row[`${label} – نرمال`] = rd.played ? rd.normalized_score : "";
+          row[`${label} – خام`] = rd.played ? rd.raw_score : "";
+          row[`${label} – زمان (ثانیه)`] = rd.played ? rd.round_time_seconds : "";
+        }
+        row["مجموع امتیاز نرمال‌شده"] = r.total_normalized;
+        row["تعداد راندهای انجام‌شده"] = `${r.rounds_played} از ${r.total_rounds}`;
+        return row;
+      });
       XLSX.utils.book_append_sheet(
         wb,
         XLSX.utils.json_to_sheet(lbSheetRows),
