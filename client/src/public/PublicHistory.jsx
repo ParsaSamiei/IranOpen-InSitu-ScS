@@ -49,12 +49,22 @@ export default function PublicHistory() {
               <td>{s.team_name}</td>
               <td>{s.round_label || s.round_number}</td>
               {showTryCol && (
-                <td>{s.allows_multiple_tries ? (s.try_number ?? '—') : '—'}</td>
+                <td>{s.scores_hidden ? '—' : (s.allows_multiple_tries ? (s.try_number ?? '—') : '—')}</td>
               )}
-              <td><span className="num-ltr" dir="ltr">{formatRoundTime(s.round_time_seconds)}</span></td>
-              <td><strong><ScoreNum value={s.final_total} /></strong></td>
+              <td>
+                {s.scores_hidden
+                  ? <span className="muted">مخفی</span>
+                  : <span className="num-ltr" dir="ltr">{formatRoundTime(s.round_time_seconds)}</span>}
+              </td>
+              <td>
+                {s.scores_hidden
+                  ? <span className="muted">مخفی</span>
+                  : <strong><ScoreNum value={s.final_total} /></strong>}
+              </td>
               <td className="row-actions">
-                <button className="link" onClick={() => setRecord(s)}>نمایش جزئیات</button>
+                {!s.scores_hidden && (
+                  <button className="link" onClick={() => setRecord(s)}>نمایش جزئیات</button>
+                )}
               </td>
             </tr>
           ))}

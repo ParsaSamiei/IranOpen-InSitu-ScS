@@ -2,11 +2,13 @@ const { pool } = require('../db');
 
 // Shared by /api/scores (admin, includeJudge=true) and /api/public/history
 // (includeJudge=false, per the migration plan's public-sanitization rule).
-async function listScores({ team_id, round_id, league, includeJudge }) {
+// When forPublic is true, rounds with scores_visible=false are returned with
+// score payloads scrubbed so callers cannot recover hidden values.
+async function listScores({ team_id, round_id, league, includeJudge, forPublic = false }) {
   let sql = `
     SELECT s.id, s.team_id, t.name AS team_name, t.league,
            s.round_id, r.round_number, r.label AS round_label,
-           r.allows_multiple_tries,
+           r.allows_multiple_tries, r.scores_visible,
            s.values_json, s.section_totals_json, s.final_total,
            s.round_time_seconds, s.captain_name, s.captain_signature,
            s.created_at, s.updated_at,
@@ -29,12 +31,39 @@ async function listScores({ team_id, round_id, league, includeJudge }) {
   sql += ' ORDER BY s.created_at DESC';
 
   const { rows } = await pool.query(sql, params);
-  return rows.map((r) => ({
-    ...r,
-    values_json: JSON.parse(r.values_json),
-    section_totals_json: JSON.parse(r.section_totals_json),
-    try_number: r.try_number != null ? Number(r.try_number) : null,
-  }));
+  return rows.map((r) => {
+    const scoresVisible = r.scores_visible !== false;
+    if (forPublic && !scoresVisible) {
+      return {
+        id: r.id,
+        team_id: r.team_id,
+        team_name: r.team_name,
+        league: r.league,
+        round_id: r.round_id,
+        round_number: r.round_number,
+        round_label: r.round_label,
+        allows_multiple_tries: r.allows_multiple_tries,
+        scores_visible: false,
+        scores_hidden: true,
+        values_json: {},
+        section_totals_json: {},
+        final_total: null,
+        round_time_seconds: null,
+        captain_name: null,
+        captain_signature: null,
+        try_number: null,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      };
+    }
+    return {
+      ...r,
+      scores_visible: scoresVisible,
+      values_json: JSON.parse(r.values_json),
+      section_totals_json: JSON.parse(r.section_totals_json),
+      try_number: r.try_number != null ? Number(r.try_number) : null,
+    };
+  });
 }
 
 // Standings, per the new scoring rules:
@@ -48,11 +77,16 @@ async function listScores({ team_id, round_id, league, includeJudge }) {
 //   - ties on total normalized score are broken by the team's summed round
 //     time (lower = better, missing times count as 0), then by name
 //
+// When forPublic is true:
+//   - rounds with scores_visible=false still appear as columns but with
+//     scores scrubbed (scores_hidden: true)
+//   - totals and ranking only use rounds that remain visible
+//
 // Authoritative score per team+round:
 //   - allows_multiple_tries: best final_total wins; ties broken by lowest
 //     round_time_seconds (missing time sorts last), then newest id
 //   - otherwise (re-judge / single try): most recently updated row wins
-async function leaderboard({ league }) {
+async function leaderboard({ league, forPublic = false }) {
   const teamParams = [];
   let teamSql = 'SELECT id, name, league FROM teams';
   if (league) { teamParams.push(league); teamSql += ' WHERE league = $1'; }
@@ -63,7 +97,7 @@ async function leaderboard({ league }) {
   const leagues = [...new Set(teams.map((t) => t.league))];
 
   const { rows: rounds } = await pool.query(
-    `SELECT id, league, round_number, label, sort_order
+    `SELECT id, league, round_number, label, sort_order, scores_visible
      FROM rounds WHERE league = ANY($1)
      ORDER BY sort_order, round_number`,
     [leagues]
@@ -112,14 +146,34 @@ async function leaderboard({ league }) {
     let total_normalized = 0;
     let total_time_seconds = 0;
     let rounds_played = 0;
+    let total_rounds = 0;
 
     const roundResults = teamRounds.map((r) => {
+      const scoresVisible = r.scores_visible !== false;
+      const hideScores = forPublic && !scoresVisible;
       const e = entryMap.get(`${t.id}:${r.id}`);
+
+      if (hideScores) {
+        return {
+          round_id: r.id,
+          round_number: r.round_number,
+          round_label: r.label,
+          scores_hidden: true,
+          played: false,
+          raw_score: null,
+          normalized_score: null,
+          round_time_seconds: null,
+        };
+      }
+
+      total_rounds += 1;
+
       if (!e) {
         return {
           round_id: r.id,
           round_number: r.round_number,
           round_label: r.label,
+          scores_hidden: false,
           played: false,
           raw_score: null,
           normalized_score: 0,
@@ -134,6 +188,7 @@ async function leaderboard({ league }) {
         round_id: r.id,
         round_number: r.round_number,
         round_label: r.label,
+        scores_hidden: false,
         played: true,
         raw_score: e.raw_score,
         normalized_score: normalized,
@@ -146,7 +201,7 @@ async function leaderboard({ league }) {
       team_name: t.name,
       league: t.league,
       rounds: roundResults,
-      total_rounds: teamRounds.length,
+      total_rounds,
       rounds_played,
       total_normalized: Math.round(total_normalized * 100) / 100,
       total_time_seconds,

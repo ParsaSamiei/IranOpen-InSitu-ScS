@@ -18,6 +18,8 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
   const [requires_captain_signature, setRequiresSignature] = useState(initial?.requires_captain_signature ?? true);
   const [floor_negative_total_to_zero, setFloorNegativeTotal] = useState(initial?.floor_negative_total_to_zero ?? false);
   const [allows_multiple_tries, setAllowsMultipleTries] = useState(initial?.allows_multiple_tries ?? false);
+  // Checkbox "مخفی کردن" is the inverse of scores_visible (default: visible).
+  const [hideScores, setHideScores] = useState(initial?.scores_visible === false);
   const [sort_order, setSortOrder] = useState(initial?.sort_order ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -35,6 +37,7 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
         requires_captain_signature,
         floor_negative_total_to_zero,
         allows_multiple_tries,
+        scores_visible: !hideScores,
         sort_order: sort_order === '' ? Number(round_number) : Number(sort_order),
       });
     } catch (err) {
@@ -74,6 +77,10 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
         <label className="checkbox-field">
           <input type="checkbox" checked={allows_multiple_tries} onChange={(e) => setAllowsMultipleTries(e.target.checked)} />
           <span>چند تلاش کامل مجاز است (بهترین امتیاز برای رده‌بندی)</span>
+        </label>
+        <label className="checkbox-field">
+          <input type="checkbox" checked={hideScores} onChange={(e) => setHideScores(e.target.checked)} />
+          <span>مخفی کردن امتیاز این راند از عموم</span>
         </label>
       </div>
       {error && <p className="error">{error}</p>}
@@ -339,6 +346,9 @@ export default function RulesTab() {
                   </span>
                   <span className={'flag-badge' + (r.allows_multiple_tries ? ' flag-badge--on' : '')}>
                     چند تلاش {r.allows_multiple_tries ? 'فعال' : 'غیرفعال'}
+                  </span>
+                  <span className={'flag-badge' + (r.scores_visible === false ? ' flag-badge--on' : '')}>
+                    {r.scores_visible === false ? 'امتیاز مخفی' : 'امتیاز عمومی'}
                   </span>
                   <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setEditingRoundId(r.id); }}>ویرایش</button>
                   <button

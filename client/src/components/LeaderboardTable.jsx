@@ -30,7 +30,9 @@ export default function LeaderboardTable({ rows, loading }) {
               <td>{row.team_name}</td>
               {row.rounds.map((rd) => (
                 <td key={rd.round_id}>
-                  {rd.played ? (
+                  {rd.scores_hidden ? (
+                    <span className="muted">مخفی</span>
+                  ) : rd.played ? (
                     <>
                       <strong><ScoreNum value={rd.normalized_score} /></strong>
                       <div className="leaderboard-round-sub muted">

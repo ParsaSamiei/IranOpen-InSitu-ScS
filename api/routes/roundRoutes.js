@@ -38,7 +38,8 @@ router.post('/rounds', requireRole('super_admin'), async (req, res) => {
   const {
     league, round_number, label,
     requires_timer = true, requires_captain_signature = true,
-    floor_negative_total_to_zero = false, allows_multiple_tries = false, sort_order,
+    floor_negative_total_to_zero = false, allows_multiple_tries = false,
+    scores_visible = true, sort_order,
   } = req.body || {};
   if (!LEAGUES.includes(league) || !round_number) {
     return res.status(400).json({ error: 'لیگ یا شماره راند نامعتبر است' });
@@ -47,12 +48,12 @@ router.post('/rounds', requireRole('super_admin'), async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO rounds (
          league, round_number, label, requires_timer, requires_captain_signature,
-         floor_negative_total_to_zero, allows_multiple_tries, sort_order
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+         floor_negative_total_to_zero, allows_multiple_tries, scores_visible, sort_order
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [
         league, Number(round_number), label || null,
         !!requires_timer, !!requires_captain_signature, !!floor_negative_total_to_zero,
-        !!allows_multiple_tries,
+        !!allows_multiple_tries, scores_visible !== false,
         sort_order != null ? Number(sort_order) : Number(round_number),
       ]
     );
@@ -78,17 +79,19 @@ router.put('/rounds/:id', requireRole('super_admin'), async (req, res) => {
     requires_captain_signature = existing.requires_captain_signature,
     floor_negative_total_to_zero = existing.floor_negative_total_to_zero,
     allows_multiple_tries = existing.allows_multiple_tries,
+    scores_visible = existing.scores_visible,
     sort_order = existing.sort_order,
   } = req.body || {};
 
   try {
     const { rows } = await pool.query(
       `UPDATE rounds SET round_number=$1, label=$2, requires_timer=$3, requires_captain_signature=$4,
-        floor_negative_total_to_zero=$5, allows_multiple_tries=$6, sort_order=$7
-       WHERE id=$8 RETURNING *`,
+        floor_negative_total_to_zero=$5, allows_multiple_tries=$6, scores_visible=$7, sort_order=$8
+       WHERE id=$9 RETURNING *`,
       [
         Number(round_number), label, !!requires_timer, !!requires_captain_signature,
-        !!floor_negative_total_to_zero, !!allows_multiple_tries, Number(sort_order), req.params.id,
+        !!floor_negative_total_to_zero, !!allows_multiple_tries, scores_visible !== false,
+        Number(sort_order), req.params.id,
       ]
     );
     res.json(rows[0]);

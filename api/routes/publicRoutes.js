@@ -22,7 +22,7 @@ router.get('/teams', async (req, res) => {
 
 router.get('/leaderboard', async (req, res) => {
   try {
-    const rows = await leaderboard({ league: req.query.league });
+    const rows = await leaderboard({ league: req.query.league, forPublic: true });
     res.json(rows);
   } catch (err) {
     console.error('Public leaderboard query failed:', err);
@@ -32,12 +32,14 @@ router.get('/leaderboard', async (req, res) => {
 
 // judge_name stripped from the public payload; captain_signature is shown
 // as-is (image included) — resolved in CHANGE_AND_MIGRATION_PLAN.md §7.
+// Rounds with scores_visible=false are returned scrubbed (scores_hidden).
 router.get('/history', async (req, res) => {
   try {
     const rows = await listScores({
       team_id: req.query.team_id,
       league: req.query.league,
       includeJudge: false,
+      forPublic: true,
     });
     res.json(rows);
   } catch (err) {
@@ -52,6 +54,9 @@ router.get('/history', async (req, res) => {
 router.get('/rounds/:id/sections', async (req, res) => {
   try {
     const { round, sections } = await loadRoundRules(req.params.id);
+    if (round.scores_visible === false) {
+      return res.status(403).json({ error: 'امتیاز این راند مخفی است' });
+    }
     res.json({ round, sections });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || 'خطا در بارگذاری قوانین راند' });

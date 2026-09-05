@@ -85,6 +85,7 @@ function initDb() {
           requires_captain_signature BOOLEAN NOT NULL DEFAULT true,
           floor_negative_total_to_zero BOOLEAN NOT NULL DEFAULT false,
           allows_multiple_tries BOOLEAN NOT NULL DEFAULT false,
+          scores_visible BOOLEAN NOT NULL DEFAULT true,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMP DEFAULT NOW(),
           UNIQUE (league, round_number)
@@ -154,6 +155,10 @@ function initDb() {
       await client.query(`
         ALTER TABLE rounds
         ADD COLUMN IF NOT EXISTS allows_multiple_tries BOOLEAN NOT NULL DEFAULT false
+      `);
+      await client.query(`
+        ALTER TABLE rounds
+        ADD COLUMN IF NOT EXISTS scores_visible BOOLEAN NOT NULL DEFAULT true
       `);
 
       await ensureDefaultSettings();
