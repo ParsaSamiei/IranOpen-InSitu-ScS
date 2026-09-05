@@ -14,6 +14,7 @@ export default function PublicHistory() {
     [league, teamId]
   );
   const [record, setRecord] = useState(null);
+  const showTryCol = (scores || []).some((s) => s.allows_multiple_tries);
 
   return (
     <div className="tab-content">
@@ -33,13 +34,23 @@ export default function PublicHistory() {
       <div className="table-scroll">
       <table className="score-table">
         <thead>
-          <tr><th>تیم</th><th>راند</th><th>زمان</th><th>امتیاز نهایی</th><th></th></tr>
+          <tr>
+            <th>تیم</th>
+            <th>راند</th>
+            {showTryCol && <th>تلاش</th>}
+            <th>زمان</th>
+            <th>امتیاز نهایی</th>
+            <th></th>
+          </tr>
         </thead>
         <tbody>
           {(scores || []).map((s) => (
             <tr key={s.id}>
               <td>{s.team_name}</td>
               <td>{s.round_label || s.round_number}</td>
+              {showTryCol && (
+                <td>{s.allows_multiple_tries ? (s.try_number ?? '—') : '—'}</td>
+              )}
               <td><span className="num-ltr" dir="ltr">{formatRoundTime(s.round_time_seconds)}</span></td>
               <td><strong><ScoreNum value={s.final_total} /></strong></td>
               <td className="row-actions">
@@ -48,7 +59,7 @@ export default function PublicHistory() {
             </tr>
           ))}
           {(scores || []).length === 0 && !loading && (
-            <tr><td colSpan={5} className="muted">رکوردی ثبت نشده</td></tr>
+            <tr><td colSpan={showTryCol ? 6 : 5} className="muted">رکوردی ثبت نشده</td></tr>
           )}
         </tbody>
       </table>

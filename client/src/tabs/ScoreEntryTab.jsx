@@ -7,6 +7,24 @@ import { formatRoundTime, roundTimeToSeconds, ScoreNum } from '../formatScore.js
 import { calcRoundTotals } from '../scoreCalc.js';
 import { LEAGUES } from '../constants.js';
 
+function SavedTrySheet({ tryRecord, sections, tryNumber }) {
+  return (
+    <section className="try-sheet try-sheet--saved">
+      <header className="try-sheet-header">
+        <h3>تلاش {tryNumber}</h3>
+        <div className="try-sheet-meta">
+          {tryRecord.round_time_seconds != null && (
+            <span>زمان: <span className="num-ltr" dir="ltr">{formatRoundTime(tryRecord.round_time_seconds)}</span></span>
+          )}
+          <span>امتیاز: <strong><ScoreNum value={tryRecord.final_total} /></strong></span>
+          {tryRecord.judge_name && <span>داور: {tryRecord.judge_name}</span>}
+        </div>
+      </header>
+      <ScoreForm sections={sections} values={tryRecord.values_json || {}} readOnly />
+    </section>
+  );
+}
+
 export default function ScoreEntryTab() {
   const [league, setLeague] = useState(LEAGUES[0]);
   const [{ data: teams }] = useAsync(() => api.getTeams(league), [league]);
@@ -31,6 +49,7 @@ export default function ScoreEntryTab() {
   const timerIntervalRef = useRef(null);
   const timerStartRef = useRef(0);
   const [resetTimerConfirmOpen, setResetTimerConfirmOpen] = useState(false);
+  const newTryAnchorRef = useRef(null);
 
   // Auto-select the first round for this league once rounds load.
   useEffect(() => {
@@ -47,6 +66,30 @@ export default function ScoreEntryTab() {
   );
   const round = rules?.round;
   const sections = rules?.sections || [];
+  const allowsMultipleTries = !!round?.allows_multiple_tries;
+
+  const [{ data: existingTriesRaw, loading: triesLoading }, reloadTries] = useAsync(
+    () => (
+      allowsMultipleTries && teamId && roundId
+        ? api.getScores({ team_id: teamId, round_id: roundId })
+        : Promise.resolve([])
+    ),
+    [allowsMultipleTries, teamId, roundId]
+  );
+
+  const existingTries = useMemo(() => {
+    const list = [...(existingTriesRaw || [])];
+    list.sort((a, b) => {
+      const ta = new Date(a.created_at).getTime();
+      const tb = new Date(b.created_at).getTime();
+      return ta - tb || a.id - b.id;
+    });
+    return list;
+  }, [existingTriesRaw]);
+
+  const sharedSignatureTry = existingTries.find((t) => t.captain_signature);
+  const hasSharedSignature = !!sharedSignatureTry?.captain_signature;
+  const nextTryNumber = existingTries.length + 1;
 
   useEffect(() => {
     if (!timerRunning) return undefined;
@@ -78,32 +121,39 @@ export default function ScoreEntryTab() {
 
   const selectedTeam = (teams || []).find((t) => String(t.id) === String(teamId));
 
-  const previewTotals = useMemo(() => calcRoundTotals(sections, values), [sections, values]);
+  const previewTotals = useMemo(() => calcRoundTotals(sections, values, round), [sections, values, round]);
 
-  const clearEntryFields = () => {
+  const clearSheetFields = ({ keepSignature = false } = {}) => {
     setValues({});
     setRoundMinutes('');
     setRoundSeconds('');
     setRoundTenths('');
     setTimerRunning(false);
     setElapsedMs(0);
-    setCaptainName('');
-    setCaptainSignature(null);
+    if (!keepSignature) {
+      setCaptainName('');
+      setCaptainSignature(null);
+    }
   };
 
   // Reset everything (including team) whenever the league changes.
   useEffect(() => {
     setTeamId('');
-    clearEntryFields();
+    clearSheetFields();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [league]);
 
-  // Clear just the sheet + timer + signature when switching rounds (team stays
-  // selected, so a judge can quickly walk the same team through every round).
+  // Clear sheet when switching rounds (team stays selected).
   useEffect(() => {
-    clearEntryFields();
+    clearSheetFields();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roundId]);
+
+  // New team → fresh signature context.
+  useEffect(() => {
+    clearSheetFields();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamId]);
 
   const advanceToNextRound = () => {
     if (!rounds || !round) return;
@@ -121,9 +171,11 @@ export default function ScoreEntryTab() {
 
   const needsSignature = !!round?.requires_captain_signature;
   const needsTimer = !!round?.requires_timer;
+  // Multi-try: signature once for the team+round; later tries reuse it.
+  const needsSignatureNow = needsSignature && !(allowsMultipleTries && hasSharedSignature);
 
   const save = async () => {
-    if (needsSignature && !captainSignature) {
+    if (needsSignatureNow && !captainSignature) {
       setMessage('برای ثبت راند، کاپیتان تیم باید امضا کند');
       return;
     }
@@ -137,19 +189,35 @@ export default function ScoreEntryTab() {
         values,
         judge_name: judge,
         round_time_seconds: needsTimer ? (round_time_seconds || 0) : null,
-        captain_name: captainName,
-        captain_signature: captainSignature,
+        captain_name: needsSignatureNow ? captainName : (captainName || sharedSignatureTry?.captain_name || null),
+        captain_signature: needsSignatureNow ? captainSignature : (captainSignature || null),
       });
-      setMessage('امتیاز با موفقیت ذخیره شد ✔');
+      setMessage(allowsMultipleTries
+        ? `تلاش ${nextTryNumber} ذخیره شد ✔ می‌توانید تلاش بعدی را پایین صفحه ثبت کنید.`
+        : 'امتیاز با موفقیت ذخیره شد ✔');
       setConfirmOpen(false);
-      clearEntryFields();
-      advanceToNextRound();
+      if (allowsMultipleTries) {
+        clearSheetFields({ keepSignature: true });
+        try {
+          await reloadTries();
+        } catch {
+          // Score already saved; list refresh failure shouldn't look like a save error.
+        }
+        requestAnimationFrame(() => {
+          newTryAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      } else {
+        clearSheetFields();
+        advanceToNextRound();
+      }
     } catch (e) {
       setMessage('خطا: ' + e.message);
     } finally {
       setSaving(false);
     }
   };
+
+  const showForm = !rulesLoading && sections.length > 0 && (!allowsMultipleTries || !!teamId);
 
   return (
     <div className="tab-content">
@@ -177,7 +245,7 @@ export default function ScoreEntryTab() {
             ))}
           </select>
         </label>
-        {needsTimer && (
+        {needsTimer && !allowsMultipleTries && (
           <label className="entry-field entry-field--time">
             <span className="entry-field-label">زمان راند</span>
             <div className="time-inputs" dir="ltr" title="دقیقه : ثانیه">
@@ -195,7 +263,13 @@ export default function ScoreEntryTab() {
         </label>
       </div>
 
-      {needsTimer && (
+      {allowsMultipleTries && (
+        <p className="try-mode-hint">
+          این راند چند تلاش کامل دارد؛ بهترین امتیاز (و در صورت تساوی کمترین زمان) در رده‌بندی لحاظ می‌شود. امضای کاپیتان فقط یک‌بار برای همه تلاش‌ها لازم است.
+        </p>
+      )}
+
+      {needsTimer && !allowsMultipleTries && (
         <div className="timer-row">
           <span className="timer-row-label">تایمر راند:</span>
           <span className="timer-display" dir="ltr">{formatRoundTime(elapsedMs / 1000)}</span>
@@ -223,29 +297,90 @@ export default function ScoreEntryTab() {
       )}
 
       {rulesLoading && <p>در حال بارگذاری قوانین راند...</p>}
-      {!rulesLoading && sections.length > 0 && (
-        <ScoreForm sections={sections} values={values} onValuesChange={setValues} />
-      )}
       {!rulesLoading && roundId && sections.length === 0 && (
         <p className="muted">برای این راند هنوز بخش یا آیتمی در قوانین امتیازدهی تعریف نشده است. از تب «قوانین امتیازدهی» آن را تنظیم کنید.</p>
       )}
 
-      <div className="save-row">
-        <button disabled={saving || !roundId} onClick={openConfirm} className="primary">
-          بررسی و ثبت امتیاز
-        </button>
-        {message && <span className={message.startsWith('خطا') ? 'error' : 'message'}>{message}</span>}
-      </div>
+      {allowsMultipleTries && teamId && (
+        <div className="prior-tries">
+          {triesLoading && <p className="muted">در حال بارگذاری تلاش‌های قبلی...</p>}
+          {!triesLoading && existingTries.map((t, i) => (
+            <SavedTrySheet
+              key={t.id}
+              tryRecord={t}
+              sections={sections}
+              tryNumber={t.try_number || i + 1}
+            />
+          ))}
+        </div>
+      )}
+
+      {allowsMultipleTries && !teamId && sections.length > 0 && (
+        <p className="muted">برای دیدن تلاش‌ها و ثبت تلاش جدید، ابتدا تیم را انتخاب کنید.</p>
+      )}
+
+      {showForm && (
+        <div ref={newTryAnchorRef} className="try-sheet try-sheet--new">
+          {allowsMultipleTries && (
+            <header className="try-sheet-header">
+              <h3>تلاش {nextTryNumber} (جدید)</h3>
+            </header>
+          )}
+          {needsTimer && allowsMultipleTries && (
+            <>
+              <div className="try-sheet-time-row">
+                <label className="entry-field entry-field--time">
+                  <span className="entry-field-label">زمان این تلاش</span>
+                  <div className="time-inputs" dir="ltr" title="دقیقه : ثانیه">
+                    <input type="number" min={0} value={roundMinutes} onChange={(e) => setRoundMinutes(e.target.value)} placeholder="0" className="time-box" aria-label="دقیقه" disabled={timerRunning} />
+                    <span className="time-sep" aria-hidden="true">:</span>
+                    <input type="number" min={0} max={59} value={roundSeconds} onChange={(e) => setRoundSeconds(e.target.value)} placeholder="00" className="time-box" aria-label="ثانیه" disabled={timerRunning} />
+                    <span className="time-sep" aria-hidden="true">.</span>
+                    <input type="number" min={0} max={9} value={roundTenths} onChange={(e) => setRoundTenths(e.target.value)} placeholder="0" className="time-box time-box--tenths" aria-label="دهم ثانیه" disabled={timerRunning} />
+                  </div>
+                </label>
+              </div>
+              <div className="timer-row">
+                <span className="timer-row-label">تایمر:</span>
+                <span className="timer-display" dir="ltr">{formatRoundTime(elapsedMs / 1000)}</span>
+                <button type="button" className={timerRunning ? 'timer-btn timer-btn--stop' : 'timer-btn timer-btn--start'} onClick={toggleTimer}>
+                  {timerRunning ? '⏸ توقف' : '▶ شروع'}
+                </button>
+                <button type="button" className="timer-btn timer-btn--reset" onClick={requestResetTimer} disabled={timerRunning}>
+                  ریست
+                </button>
+              </div>
+            </>
+          )}
+          <ScoreForm sections={sections} values={values} onValuesChange={setValues} />
+        </div>
+      )}
+
+      {showForm && (
+        <div className="save-row">
+          <button disabled={saving || !roundId || !teamId} onClick={openConfirm} className="primary">
+            {allowsMultipleTries ? `بررسی و ثبت تلاش ${nextTryNumber}` : 'بررسی و ثبت امتیاز'}
+          </button>
+          {message && <span className={message.startsWith('خطا') ? 'error' : 'message'}>{message}</span>}
+        </div>
+      )}
 
       {confirmOpen && (
         <div className="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
           <div className="confirm-card">
-            <h3 id="confirm-title">آیا از ثبت امتیاز مطمئن هستید؟</h3>
+            <h3 id="confirm-title">
+              {allowsMultipleTries
+                ? `آیا از ثبت تلاش ${nextTryNumber} مطمئن هستید؟`
+                : 'آیا از ثبت امتیاز مطمئن هستید؟'}
+            </h3>
             <p className="confirm-hint">لطفاً قبل از ذخیره، اطلاعات زیر را یک‌بار دیگر بررسی کنید.</p>
             <dl className="confirm-summary">
               <div><dt>تیم</dt><dd>{selectedTeam?.name || '—'}</dd></div>
               <div><dt>لیگ</dt><dd>{league}</dd></div>
               <div><dt>راند</dt><dd>{round?.label || `راند ${round?.round_number}`}</dd></div>
+              {allowsMultipleTries && (
+                <div><dt>شماره تلاش</dt><dd>{nextTryNumber}</dd></div>
+              )}
               {needsTimer && (
                 <div><dt>زمان راند</dt><dd><span className="num-ltr" dir="ltr">{formatRoundTime(roundTimeToSeconds(roundMinutes, roundSeconds, roundTenths))}</span></dd></div>
               )}
@@ -255,14 +390,27 @@ export default function ScoreEntryTab() {
               <div className="confirm-final"><dt>امتیاز نهایی</dt><dd><ScoreNum value={previewTotals.final_total} /></dd></div>
             </dl>
 
-            {needsSignature ? (
+            {needsSignatureNow ? (
               <div className="signature-block">
                 <label className="signature-name-label">
                   <span>نام کاپیتان تیم</span>
                   <input value={captainName} onChange={(e) => setCaptainName(e.target.value)} placeholder="نام و نام خانوادگی" />
                 </label>
-                <p className="confirm-hint">کاپیتان تیم با امضای زیر، صحت امتیازهای ثبت‌شده در این راند را تایید می‌کند.</p>
+                <p className="confirm-hint">
+                  {allowsMultipleTries
+                    ? 'این امضا برای همه تلاش‌های این تیم در این راند معتبر است.'
+                    : 'کاپیتان تیم با امضای زیر، صحت امتیازهای ثبت‌شده در این راند را تایید می‌کند.'}
+                </p>
                 <SignaturePad value={captainSignature} onChange={setCaptainSignature} />
+              </div>
+            ) : needsSignature && hasSharedSignature ? (
+              <div className="signature-block signature-block-readonly">
+                <div className="signature-readonly-name">
+                  <span>کاپیتان تیم</span>
+                  <strong>{sharedSignatureTry.captain_name || '—'}</strong>
+                </div>
+                <img src={sharedSignatureTry.captain_signature} alt="امضای کاپیتان تیم" className="signature-preview" />
+                <span className="signature-hint">امضا قبلاً برای تلاش‌های این راند ثبت شده است</span>
               </div>
             ) : (
               <div className="signature-block">
@@ -277,9 +425,9 @@ export default function ScoreEntryTab() {
               <button
                 type="button"
                 className="primary"
-                disabled={saving || (needsSignature && !captainSignature)}
+                disabled={saving || (needsSignatureNow && !captainSignature)}
                 onClick={save}
-                title={needsSignature && !captainSignature ? 'ابتدا کاپیتان تیم باید امضا کند' : undefined}
+                title={needsSignatureNow && !captainSignature ? 'ابتدا کاپیتان تیم باید امضا کند' : undefined}
               >
                 {saving ? 'در حال ذخیره...' : 'بله، ذخیره شود'}
               </button>

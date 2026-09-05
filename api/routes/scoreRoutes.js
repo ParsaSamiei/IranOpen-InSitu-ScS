@@ -52,10 +52,28 @@ router.post('/scores', async (req, res) => {
     return res.status(400).json({ error: 'لیگ این راند با لیگ تیم مطابقت ندارد' });
   }
 
-  // The captain's signature is the team's admission that the scores on this
-  // sheet are correct — required unless this round's rule builder config
-  // turned that requirement off (rounds.requires_captain_signature).
-  if (round.requires_captain_signature && !captain_signature) {
+  // Captain signature: required when the round asks for it. With multiple
+  // tries, one signature covers every try for that team+round — later tries
+  // reuse (and copy) the signature already on file.
+  let resolvedCaptainName = captain_name || null;
+  let resolvedCaptainSignature = captain_signature || null;
+
+  if (round.allows_multiple_tries && !resolvedCaptainSignature) {
+    const { rows: priorSig } = await pool.query(
+      `SELECT captain_name, captain_signature FROM score_entries
+       WHERE team_id = $1 AND round_id = $2
+         AND captain_signature IS NOT NULL AND captain_signature <> ''
+       ORDER BY created_at ASC, id ASC
+       LIMIT 1`,
+      [team_id, round_id]
+    );
+    if (priorSig[0]) {
+      resolvedCaptainSignature = priorSig[0].captain_signature;
+      if (!resolvedCaptainName) resolvedCaptainName = priorSig[0].captain_name;
+    }
+  }
+
+  if (round.requires_captain_signature && !resolvedCaptainSignature) {
     return res.status(400).json({ error: 'برای ثبت این راند، امضای کاپیتان تیم الزامی است' });
   }
   if (round.requires_timer && (round_time_seconds == null || round_time_seconds === '')) {
@@ -78,7 +96,7 @@ router.post('/scores', async (req, res) => {
        RETURNING id`,
       [
         team_id, round_id, JSON.stringify(values || {}), JSON.stringify(section_totals), totals.final_total,
-        timeSeconds, judge_name || null, captain_name || null, captain_signature || null, req.user?.sub || null,
+        timeSeconds, judge_name || null, resolvedCaptainName, resolvedCaptainSignature, req.user?.sub || null,
       ]
     );
     res.json({ id: rows[0].id, section_totals, final_total: totals.final_total });

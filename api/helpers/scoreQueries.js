@@ -6,9 +6,16 @@ async function listScores({ team_id, round_id, league, includeJudge }) {
   let sql = `
     SELECT s.id, s.team_id, t.name AS team_name, t.league,
            s.round_id, r.round_number, r.label AS round_label,
+           r.allows_multiple_tries,
            s.values_json, s.section_totals_json, s.final_total,
            s.round_time_seconds, s.captain_name, s.captain_signature,
-           s.created_at, s.updated_at
+           s.created_at, s.updated_at,
+           CASE WHEN r.allows_multiple_tries THEN
+             ROW_NUMBER() OVER (
+               PARTITION BY s.team_id, s.round_id
+               ORDER BY s.created_at ASC, s.id ASC
+             )
+           ELSE NULL END AS try_number
            ${includeJudge ? ', s.judge_name' : ''}
     FROM score_entries s
     JOIN teams t ON t.id = s.team_id
@@ -26,6 +33,7 @@ async function listScores({ team_id, round_id, league, includeJudge }) {
     ...r,
     values_json: JSON.parse(r.values_json),
     section_totals_json: JSON.parse(r.section_totals_json),
+    try_number: r.try_number != null ? Number(r.try_number) : null,
   }));
 }
 
@@ -40,9 +48,10 @@ async function listScores({ team_id, round_id, league, includeJudge }) {
 //   - ties on total normalized score are broken by the team's summed round
 //     time (lower = better, missing times count as 0), then by name
 //
-// If a team has more than one score_entries row for the same round (e.g. a
-// re-judged sheet), the most recently updated one is treated as that round's
-// authoritative score — the same "latest wins" idea the edit flow relies on.
+// Authoritative score per team+round:
+//   - allows_multiple_tries: best final_total wins; ties broken by lowest
+//     round_time_seconds (missing time sorts last), then newest id
+//   - otherwise (re-judge / single try): most recently updated row wins
 async function leaderboard({ league }) {
   const teamParams = [];
   let teamSql = 'SELECT id, name, league FROM teams';
@@ -68,7 +77,11 @@ async function leaderboard({ league }) {
       FROM score_entries s
       JOIN rounds r ON r.id = s.round_id
       WHERE r.league = ANY($1)
-      ORDER BY s.team_id, s.round_id, s.updated_at DESC, s.id DESC
+      ORDER BY s.team_id, s.round_id,
+        CASE WHEN r.allows_multiple_tries THEN s.final_total END DESC NULLS LAST,
+        CASE WHEN r.allows_multiple_tries THEN COALESCE(s.round_time_seconds, 1e12) END ASC,
+        s.updated_at DESC,
+        s.id DESC
     ),
     round_best AS (
       SELECT round_id, MAX(final_total) AS best_score

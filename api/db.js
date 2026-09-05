@@ -83,6 +83,8 @@ function initDb() {
           label TEXT,
           requires_timer BOOLEAN NOT NULL DEFAULT true,
           requires_captain_signature BOOLEAN NOT NULL DEFAULT true,
+          floor_negative_total_to_zero BOOLEAN NOT NULL DEFAULT false,
+          allows_multiple_tries BOOLEAN NOT NULL DEFAULT false,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMP DEFAULT NOW(),
           UNIQUE (league, round_number)
@@ -142,6 +144,16 @@ function initDb() {
           key TEXT PRIMARY KEY,
           value TEXT
         );
+      `);
+
+      // Idempotent column adds for DBs created before these flags existed.
+      await client.query(`
+        ALTER TABLE rounds
+        ADD COLUMN IF NOT EXISTS floor_negative_total_to_zero BOOLEAN NOT NULL DEFAULT false
+      `);
+      await client.query(`
+        ALTER TABLE rounds
+        ADD COLUMN IF NOT EXISTS allows_multiple_tries BOOLEAN NOT NULL DEFAULT false
       `);
 
       await ensureDefaultSettings();

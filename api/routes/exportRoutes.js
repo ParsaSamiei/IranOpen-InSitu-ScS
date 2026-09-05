@@ -55,14 +55,21 @@ async function buildRoundSheet(round, usedNames) {
     [round.id],
   );
 
-  const sheetRows = scoreRows.map((s) => {
+  const sheetRows = scoreRows.map((s, idx) => {
     const values = JSON.parse(s.values_json);
     const sectionTotals = JSON.parse(s.section_totals_json);
     const row = {
       تیم: s.team_name,
-      "زمان راند (ثانیه)": s.round_time_seconds,
-      داور: s.judge_name || "",
     };
+    if (round.allows_multiple_tries) {
+      // Per-team try index in creation order (same ordering as the query).
+      const teamTryCount = scoreRows
+        .slice(0, idx + 1)
+        .filter((x) => x.team_id === s.team_id).length;
+      row['شماره تلاش'] = teamTryCount;
+    }
+    row['زمان راند (ثانیه)'] = s.round_time_seconds;
+    row['داور'] = s.judge_name || '';
     for (const item of flatItems) {
       const raw = values?.[item.sectionKey]?.[item.key];
       row[`${item.sectionLabel} – ${item.label}`] = formatItemValue(item, raw);

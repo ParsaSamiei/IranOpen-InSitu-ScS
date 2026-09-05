@@ -47,7 +47,12 @@ export default function ScoreRecordModal({ mode, record, onClose, onSaved, publi
   return (
     <div className="confirm-overlay" role="dialog" aria-modal="true">
       <div className="confirm-card record-modal">
-        <h3>{readOnly ? 'مشاهده رکورد امتیاز' : 'ویرایش رکورد امتیاز'}</h3>
+        <h3>
+          {readOnly ? 'مشاهده رکورد امتیاز' : 'ویرایش رکورد امتیاز'}
+          {record.allows_multiple_tries && record.try_number != null
+            ? ` — تلاش ${record.try_number}`
+            : ''}
+        </h3>
         <div className="record-modal-meta">
           <div><span>تیم</span><strong>{record.team_name}</strong></div>
           <div><span>لیگ</span><strong>{record.league}</strong></div>

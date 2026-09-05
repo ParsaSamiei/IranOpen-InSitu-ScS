@@ -111,6 +111,10 @@ async function calculateTotals(round_id, values) {
     final_total += total;
   }
 
+  if (round.floor_negative_total_to_zero && final_total < 0) {
+    final_total = 0;
+  }
+
   return { round, sections, section_results, final_total };
 }
 

@@ -30,8 +30,8 @@ export function calcSection(items, values) {
 
 // Computes every section's total + the round's final_total for a nested
 // { sections: [{key, items}] } round-rules payload and a values object keyed
-// by section key.
-export function calcRoundTotals(sections, values) {
+// by section key. Optional `round` may include floor_negative_total_to_zero.
+export function calcRoundTotals(sections, values, round) {
   const v = values || {};
   const sectionResults = {};
   let final_total = 0;
@@ -39,6 +39,9 @@ export function calcRoundTotals(sections, values) {
     const { total, breakdown } = calcSection(section.items, v[section.key] || {});
     sectionResults[section.key] = { total, breakdown };
     final_total += total;
+  }
+  if (round?.floor_negative_total_to_zero && final_total < 0) {
+    final_total = 0;
   }
   return { sectionResults, final_total };
 }

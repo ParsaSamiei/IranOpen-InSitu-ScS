@@ -10,6 +10,8 @@ export default function HistoryTab() {
   const [{ data: scores, loading }, reload] = useAsync(() => api.getScores({ league }), [league]);
   const [modal, setModal] = useState(null); // { mode: 'view' | 'edit', record }
 
+  const showTryCol = (scores || []).some((s) => s.allows_multiple_tries);
+
   const remove = async (id) => {
     if (!confirm('حذف این رکورد امتیاز؟')) return;
     await api.deleteScore(id);
@@ -29,7 +31,13 @@ export default function HistoryTab() {
       <table className="score-table">
         <thead>
           <tr>
-            <th>تیم</th><th>راند</th><th>زمان</th><th>امتیاز نهایی</th><th>داور</th><th></th>
+            <th>تیم</th>
+            <th>راند</th>
+            {showTryCol && <th>تلاش</th>}
+            <th>زمان</th>
+            <th>امتیاز نهایی</th>
+            <th>داور</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -37,6 +45,9 @@ export default function HistoryTab() {
             <tr key={s.id}>
               <td>{s.team_name}</td>
               <td>{s.round_label || s.round_number}</td>
+              {showTryCol && (
+                <td>{s.allows_multiple_tries ? (s.try_number ?? '—') : '—'}</td>
+              )}
               <td><span className="num-ltr" dir="ltr">{formatRoundTime(s.round_time_seconds)}</span></td>
               <td><strong><ScoreNum value={s.final_total} /></strong></td>
               <td>{s.judge_name || '-'}</td>
@@ -48,7 +59,7 @@ export default function HistoryTab() {
             </tr>
           ))}
           {(scores || []).length === 0 && !loading && (
-            <tr><td colSpan={6} className="muted">رکوردی ثبت نشده</td></tr>
+            <tr><td colSpan={showTryCol ? 7 : 6} className="muted">رکوردی ثبت نشده</td></tr>
           )}
         </tbody>
       </table>

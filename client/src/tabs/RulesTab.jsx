@@ -16,6 +16,8 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
   const [label, setLabel] = useState(initial?.label ?? '');
   const [requires_timer, setRequiresTimer] = useState(initial?.requires_timer ?? true);
   const [requires_captain_signature, setRequiresSignature] = useState(initial?.requires_captain_signature ?? true);
+  const [floor_negative_total_to_zero, setFloorNegativeTotal] = useState(initial?.floor_negative_total_to_zero ?? false);
+  const [allows_multiple_tries, setAllowsMultipleTries] = useState(initial?.allows_multiple_tries ?? false);
   const [sort_order, setSortOrder] = useState(initial?.sort_order ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -31,6 +33,8 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
         label: label.trim() || null,
         requires_timer,
         requires_captain_signature,
+        floor_negative_total_to_zero,
+        allows_multiple_tries,
         sort_order: sort_order === '' ? Number(round_number) : Number(sort_order),
       });
     } catch (err) {
@@ -62,6 +66,14 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
         <label className="checkbox-field">
           <input type="checkbox" checked={requires_captain_signature} onChange={(e) => setRequiresSignature(e.target.checked)} />
           <span>این راند به امضای کاپیتان نیاز دارد</span>
+        </label>
+        <label className="checkbox-field">
+          <input type="checkbox" checked={floor_negative_total_to_zero} onChange={(e) => setFloorNegativeTotal(e.target.checked)} />
+          <span>اگر مجموع امتیاز راند منفی شد، صفر در نظر گرفته شود</span>
+        </label>
+        <label className="checkbox-field">
+          <input type="checkbox" checked={allows_multiple_tries} onChange={(e) => setAllowsMultipleTries(e.target.checked)} />
+          <span>چند تلاش کامل مجاز است (بهترین امتیاز برای رده‌بندی)</span>
         </label>
       </div>
       {error && <p className="error">{error}</p>}
@@ -322,6 +334,12 @@ export default function RulesTab() {
                 <span className="round-list-item-meta">
                   <span className={'flag-badge' + (r.requires_timer ? ' flag-badge--on' : '')}>تایمر {r.requires_timer ? 'الزامی' : 'غیرفعال'}</span>
                   <span className={'flag-badge' + (r.requires_captain_signature ? ' flag-badge--on' : '')}>امضا {r.requires_captain_signature ? 'الزامی' : 'غیرفعال'}</span>
+                  <span className={'flag-badge' + (r.floor_negative_total_to_zero ? ' flag-badge--on' : '')}>
+                    منفی → صفر {r.floor_negative_total_to_zero ? 'فعال' : 'غیرفعال'}
+                  </span>
+                  <span className={'flag-badge' + (r.allows_multiple_tries ? ' flag-badge--on' : '')}>
+                    چند تلاش {r.allows_multiple_tries ? 'فعال' : 'غیرفعال'}
+                  </span>
                   <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setEditingRoundId(r.id); }}>ویرایش</button>
                   <button
                     type="button"

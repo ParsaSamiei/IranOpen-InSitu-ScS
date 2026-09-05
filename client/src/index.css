@@ -1525,6 +1525,69 @@ button:disabled {
   margin-bottom: 14px;
 }
 
+.try-mode-hint {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.prior-tries {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.try-sheet {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: var(--paper);
+}
+
+.try-sheet--saved {
+  background: color-mix(in srgb, var(--paper) 92%, var(--ink-soft));
+}
+
+.try-sheet--new {
+  border-color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.try-sheet-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.try-sheet-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--navy);
+}
+
+.try-sheet-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.try-sheet-time-row {
+  margin-bottom: 10px;
+}
+
 @media (max-width: 640px) {
   .item-editor-row {
     grid-template-columns: 1fr;
