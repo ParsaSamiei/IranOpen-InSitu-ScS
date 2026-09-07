@@ -54,7 +54,7 @@ export default function ScoreRecordModal({ mode, record, onClose, onSaved, publi
             : ''}
         </h3>
         <div className="record-modal-meta">
-          <div><span>تیم</span><strong>{record.team_name}</strong></div>
+          <div><span>{record.super_team_id || record.is_superteam ? 'سوپرتیم' : 'تیم'}</span><strong>{record.team_name}</strong></div>
           <div><span>لیگ</span><strong>{record.league}</strong></div>
           <div><span>راند</span><strong>{record.round_label || `راند ${record.round_number}`}</strong></div>
           <label>

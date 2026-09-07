@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAsync } from '../hooks/useAsync.js';
-import { LEAGUES } from '../constants.js';
+import { LEAGUES, ROUND_LEAGUES, SUPERTEAM_LEAGUE } from '../constants.js';
 
 const ITEM_TYPES = [
   { value: 'binary', label: 'بله/خیر (تیک)' },
@@ -23,6 +23,7 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
   const [sort_order, setSortOrder] = useState(initial?.sort_order ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const isSuperRound = league === SUPERTEAM_LEAGUE;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -38,6 +39,7 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
         floor_negative_total_to_zero,
         allows_multiple_tries,
         scores_visible: !hideScores,
+        is_superteam: isSuperRound,
         sort_order: sort_order === '' ? Number(round_number) : Number(sort_order),
       });
     } catch (err) {
@@ -320,8 +322,15 @@ export default function RulesTab() {
       </p>
 
       <select value={league} onChange={(e) => { setLeague(e.target.value); setSelectedRoundId(''); }}>
-        {LEAGUES.map((l) => <option key={l} value={l}>{l}</option>)}
+        {ROUND_LEAGUES.map((l) => <option key={l} value={l}>{l}</option>)}
       </select>
+
+      {league === SUPERTEAM_LEAGUE && (
+        <p className="muted">
+          راند سوپرتیم مشترک برای هر دو لیگ است؛ تیم‌ها از لیگ‌های مختلف می‌توانند در یک سوپرتیم باشند.
+          رده‌بندی این راند جدا از رده‌بندی عادی تیم‌هاست.
+        </p>
+      )}
 
       <ul className="round-list">
         {(rounds || []).map((r) => (

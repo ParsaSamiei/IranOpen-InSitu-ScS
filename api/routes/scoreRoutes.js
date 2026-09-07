@@ -2,6 +2,12 @@ const express = require('express');
 const { pool } = require('../db');
 const { calculateTotals } = require('../rulesEngine');
 const { listScores, leaderboard } = require('../helpers/scoreQueries');
+const { getSuperTeam } = require('../helpers/superTeamQueries');
+const {
+  SUPERTEAM_LEAGUE,
+  SUPERTEAM_MIN_MEMBERS,
+  SUPERTEAM_MAX_MEMBERS,
+} = require('../constants');
 
 const router = express.Router();
 
@@ -9,6 +15,7 @@ router.get('/scores', async (req, res) => {
   try {
     const rows = await listScores({
       team_id: req.query.team_id,
+      super_team_id: req.query.super_team_id,
       round_id: req.query.round_id,
       league: req.query.league,
       includeJudge: true,
@@ -32,41 +39,72 @@ router.get('/leaderboard', async (req, res) => {
 
 router.post('/scores', async (req, res) => {
   const {
-    team_id, round_id, values, judge_name, round_time_seconds,
+    team_id, super_team_id, round_id, values, judge_name, round_time_seconds,
     captain_name, captain_signature,
   } = req.body || {};
 
-  if (!team_id || !round_id) {
-    return res.status(400).json({ error: 'ورودی نامعتبر است (تیم یا راند)' });
+  const hasTeam = team_id != null && team_id !== '';
+  const hasSuper = super_team_id != null && super_team_id !== '';
+  if ((!hasTeam && !hasSuper) || (hasTeam && hasSuper) || !round_id) {
+    return res.status(400).json({ error: 'ورودی نامعتبر است (تیم/سوپرتیم یا راند)' });
   }
-
-  const { rows: teamRows } = await pool.query('SELECT * FROM teams WHERE id = $1', [team_id]);
-  const team = teamRows[0];
-  if (!team) return res.status(400).json({ error: 'تیم یافت نشد' });
 
   const { rows: roundRows } = await pool.query('SELECT * FROM rounds WHERE id = $1', [round_id]);
   const round = roundRows[0];
   if (!round) return res.status(400).json({ error: 'راند یافت نشد' });
 
-  if (round.league !== team.league) {
-    return res.status(400).json({ error: 'لیگ این راند با لیگ تیم مطابقت ندارد' });
+  const isSuperRound = !!round.is_superteam || round.league === SUPERTEAM_LEAGUE;
+
+  let participantTeamId = null;
+  let participantSuperTeamId = null;
+  let priorSigParams = [];
+
+  if (hasSuper) {
+    if (!isSuperRound) {
+      return res.status(400).json({ error: 'این راند سوپرتیم نیست' });
+    }
+    const st = await getSuperTeam(Number(super_team_id));
+    if (!st) return res.status(400).json({ error: 'سوپرتیم یافت نشد' });
+    if (st.member_count < SUPERTEAM_MIN_MEMBERS || st.member_count > SUPERTEAM_MAX_MEMBERS) {
+      return res.status(400).json({
+        error: `سوپرتیم باید ${SUPERTEAM_MIN_MEMBERS} یا ${SUPERTEAM_MAX_MEMBERS} تیم داشته باشد`,
+      });
+    }
+    participantSuperTeamId = st.id;
+    priorSigParams = [st.id, round_id];
+  } else {
+    if (isSuperRound) {
+      return res.status(400).json({ error: 'برای راند سوپرتیم باید سوپرتیم انتخاب شود' });
+    }
+    const { rows: teamRows } = await pool.query('SELECT * FROM teams WHERE id = $1', [team_id]);
+    const team = teamRows[0];
+    if (!team) return res.status(400).json({ error: 'تیم یافت نشد' });
+    if (round.league !== team.league) {
+      return res.status(400).json({ error: 'لیگ این راند با لیگ تیم مطابقت ندارد' });
+    }
+    participantTeamId = team.id;
+    priorSigParams = [team.id, round_id];
   }
 
   // Captain signature: required when the round asks for it. With multiple
-  // tries, one signature covers every try for that team+round — later tries
-  // reuse (and copy) the signature already on file.
+  // tries, one signature covers every try for that participant+round — later
+  // tries reuse (and copy) the signature already on file.
   let resolvedCaptainName = captain_name || null;
   let resolvedCaptainSignature = captain_signature || null;
 
   if (round.allows_multiple_tries && !resolvedCaptainSignature) {
-    const { rows: priorSig } = await pool.query(
-      `SELECT captain_name, captain_signature FROM score_entries
-       WHERE team_id = $1 AND round_id = $2
-         AND captain_signature IS NOT NULL AND captain_signature <> ''
-       ORDER BY created_at ASC, id ASC
-       LIMIT 1`,
-      [team_id, round_id]
-    );
+    const priorSql = hasSuper
+      ? `SELECT captain_name, captain_signature FROM score_entries
+         WHERE super_team_id = $1 AND round_id = $2
+           AND captain_signature IS NOT NULL AND captain_signature <> ''
+         ORDER BY created_at ASC, id ASC
+         LIMIT 1`
+      : `SELECT captain_name, captain_signature FROM score_entries
+         WHERE team_id = $1 AND round_id = $2
+           AND captain_signature IS NOT NULL AND captain_signature <> ''
+         ORDER BY created_at ASC, id ASC
+         LIMIT 1`;
+    const { rows: priorSig } = await pool.query(priorSql, priorSigParams);
     if (priorSig[0]) {
       resolvedCaptainSignature = priorSig[0].captain_signature;
       if (!resolvedCaptainName) resolvedCaptainName = priorSig[0].captain_name;
@@ -74,7 +112,11 @@ router.post('/scores', async (req, res) => {
   }
 
   if (round.requires_captain_signature && !resolvedCaptainSignature) {
-    return res.status(400).json({ error: 'برای ثبت این راند، امضای کاپیتان تیم الزامی است' });
+    return res.status(400).json({
+      error: hasSuper
+        ? 'برای ثبت این راند، امضای کاپیتان سوپرتیم الزامی است'
+        : 'برای ثبت این راند، امضای کاپیتان تیم الزامی است',
+    });
   }
   if (round.requires_timer && (round_time_seconds == null || round_time_seconds === '')) {
     return res.status(400).json({ error: 'برای ثبت این راند، زمان راند الزامی است' });
@@ -91,11 +133,12 @@ router.post('/scores', async (req, res) => {
 
     const { rows } = await pool.query(
       `INSERT INTO score_entries
-         (team_id, round_id, values_json, section_totals_json, final_total, round_time_seconds, judge_name, captain_name, captain_signature, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (team_id, super_team_id, round_id, values_json, section_totals_json, final_total, round_time_seconds, judge_name, captain_name, captain_signature, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
       [
-        team_id, round_id, JSON.stringify(values || {}), JSON.stringify(section_totals), totals.final_total,
+        participantTeamId, participantSuperTeamId, round_id,
+        JSON.stringify(values || {}), JSON.stringify(section_totals), totals.final_total,
         timeSeconds, judge_name || null, resolvedCaptainName, resolvedCaptainSignature, req.user?.sub || null,
       ]
     );

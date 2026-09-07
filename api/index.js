@@ -14,6 +14,7 @@ const { loginIpLimiter, loginUsernameLimiter, resetUsername } = require('./rateL
 
 const publicRoutes = require('./routes/publicRoutes');
 const teamRoutes = require('./routes/teamRoutes');
+const superTeamRoutes = require('./routes/superTeamRoutes');
 const roundRoutes = require('./routes/roundRoutes');
 const scoreRoutes = require('./routes/scoreRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -92,6 +93,7 @@ app.post('/api/login', loginIpLimiter, loginUsernameLimiter, async (req, res) =>
 app.use('/api', authMiddleware);
 
 app.use('/api/teams', teamRoutes);
+app.use('/api/super-teams', superTeamRoutes);
 app.use('/api', roundRoutes); // mounts /api/rounds, /api/rounds/:id/sections, /api/sections/:id, /api/items/:id, etc.
 app.use('/api', scoreRoutes); // mounts /api/scores, /api/leaderboard
 app.use('/api/users', userRoutes);

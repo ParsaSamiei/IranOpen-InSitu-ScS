@@ -7,8 +7,10 @@ import logo from "../assets/horse-logo.png";
 const TABS = [
   { to: "/admin/entry", label: "ثبت امتیاز" },
   { to: "/admin/teams", label: "تیم‌ها" },
+  { to: "/admin/super-teams", label: "سوپرتیم‌ها", superOnly: true },
   { to: "/admin/history", label: "سوابق" },
   { to: "/admin/leaderboard", label: "رده‌بندی" },
+  { to: "/admin/super-team-leaderboard", label: "رده‌بندی سوپرتیم" },
   { to: "/admin/export", label: "خروجی اکسل" },
   { to: "/admin/rules", label: "قوانین امتیازدهی", superOnly: true },
   { to: "/admin/users", label: "کاربران", superOnly: true },

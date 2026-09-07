@@ -10,12 +10,15 @@ import Login from './Login.jsx';
 import AdminLayout from './layouts/AdminLayout.jsx';
 import ScoreEntryTab from './tabs/ScoreEntryTab.jsx';
 import TeamsTab from './tabs/TeamsTab.jsx';
+import SuperTeamsTab from './tabs/SuperTeamsTab.jsx';
 import HistoryTab from './tabs/HistoryTab.jsx';
 import LeaderboardTab from './tabs/LeaderboardTab.jsx';
+import SuperTeamLeaderboardTab from './tabs/SuperTeamLeaderboardTab.jsx';
 import ExportTab from './tabs/ExportTab.jsx';
 import RulesTab from './tabs/RulesTab.jsx';
 import UsersTab from './tabs/UsersTab.jsx';
 import SettingsTab from './tabs/SettingsTab.jsx';
+import PublicSuperTeamLeaderboard from './public/PublicSuperTeamLeaderboard.jsx';
 
 // Redirects to /admin/login when the session expires mid-use inside the
 // admin panel — api.js dispatches this on any 401 response. Scoped to /admin
@@ -56,6 +59,7 @@ export default function App() {
         <Route path="/" element={<PublicLayout />}>
           <Route index element={<Navigate to="/leaderboard" replace />} />
           <Route path="leaderboard" element={<PublicLeaderboard />} />
+          <Route path="super-teams" element={<PublicSuperTeamLeaderboard />} />
           <Route path="history" element={<PublicHistory />} />
         </Route>
 
@@ -67,8 +71,10 @@ export default function App() {
           <Route index element={<Navigate to="/admin/entry" replace />} />
           <Route path="entry" element={<ScoreEntryTab />} />
           <Route path="teams" element={<TeamsTab />} />
+          <Route path="super-teams" element={<RequireSuperAdmin><SuperTeamsTab /></RequireSuperAdmin>} />
           <Route path="history" element={<HistoryTab />} />
           <Route path="leaderboard" element={<LeaderboardTab />} />
+          <Route path="super-team-leaderboard" element={<SuperTeamLeaderboardTab />} />
           <Route path="export" element={<ExportTab />} />
           <Route path="rules" element={<RequireSuperAdmin><RulesTab /></RequireSuperAdmin>} />
           <Route path="users" element={<RequireSuperAdmin><UsersTab /></RequireSuperAdmin>} />

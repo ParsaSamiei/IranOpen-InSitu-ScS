@@ -1,6 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
-const { LEAGUES, RULE_ITEM_TYPES } = require('../constants');
+const { LEAGUES, ROUND_LEAGUES, SUPERTEAM_LEAGUE, RULE_ITEM_TYPES } = require('../constants');
 const { requireRole } = require('../auth');
 const { loadRoundRules } = require('../rulesEngine');
 
@@ -39,21 +39,26 @@ router.post('/rounds', requireRole('super_admin'), async (req, res) => {
     league, round_number, label,
     requires_timer = true, requires_captain_signature = true,
     floor_negative_total_to_zero = false, allows_multiple_tries = false,
-    scores_visible = true, sort_order,
+    scores_visible = true, is_superteam = false, sort_order,
   } = req.body || {};
-  if (!LEAGUES.includes(league) || !round_number) {
+  if (!ROUND_LEAGUES.includes(league) || !round_number) {
     return res.status(400).json({ error: 'لیگ یا شماره راند نامعتبر است' });
+  }
+  const superRound = !!is_superteam || league === SUPERTEAM_LEAGUE;
+  const storedLeague = superRound ? SUPERTEAM_LEAGUE : league;
+  if (!superRound && !LEAGUES.includes(storedLeague)) {
+    return res.status(400).json({ error: 'لیگ نامعتبر است' });
   }
   try {
     const { rows } = await pool.query(
       `INSERT INTO rounds (
          league, round_number, label, requires_timer, requires_captain_signature,
-         floor_negative_total_to_zero, allows_multiple_tries, scores_visible, sort_order
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+         floor_negative_total_to_zero, allows_multiple_tries, scores_visible, is_superteam, sort_order
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
       [
-        league, Number(round_number), label || null,
+        storedLeague, Number(round_number), label || null,
         !!requires_timer, !!requires_captain_signature, !!floor_negative_total_to_zero,
-        !!allows_multiple_tries, scores_visible !== false,
+        !!allows_multiple_tries, scores_visible !== false, superRound,
         sort_order != null ? Number(sort_order) : Number(round_number),
       ]
     );
@@ -80,18 +85,21 @@ router.put('/rounds/:id', requireRole('super_admin'), async (req, res) => {
     floor_negative_total_to_zero = existing.floor_negative_total_to_zero,
     allows_multiple_tries = existing.allows_multiple_tries,
     scores_visible = existing.scores_visible,
+    is_superteam = existing.is_superteam,
     sort_order = existing.sort_order,
   } = req.body || {};
+
+  const superRound = !!is_superteam || existing.league === SUPERTEAM_LEAGUE;
 
   try {
     const { rows } = await pool.query(
       `UPDATE rounds SET round_number=$1, label=$2, requires_timer=$3, requires_captain_signature=$4,
-        floor_negative_total_to_zero=$5, allows_multiple_tries=$6, scores_visible=$7, sort_order=$8
-       WHERE id=$9 RETURNING *`,
+        floor_negative_total_to_zero=$5, allows_multiple_tries=$6, scores_visible=$7, is_superteam=$8, sort_order=$9
+       WHERE id=$10 RETURNING *`,
       [
         Number(round_number), label, !!requires_timer, !!requires_captain_signature,
         !!floor_negative_total_to_zero, !!allows_multiple_tries, scores_visible !== false,
-        Number(sort_order), req.params.id,
+        superRound, Number(sort_order), req.params.id,
       ]
     );
     res.json(rows[0]);

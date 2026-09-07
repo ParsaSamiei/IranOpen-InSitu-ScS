@@ -86,6 +86,8 @@ export const api = {
   getPublicSettings: () => req("/public/settings"),
   getPublicTeams: (league) => req("/public/teams" + qs({ league })),
   getPublicLeaderboard: (league) => req("/public/leaderboard" + qs({ league })),
+  getPublicSuperTeams: () => req("/public/super-teams"),
+  getPublicSuperTeamLeaderboard: () => req("/public/super-teams/leaderboard"),
   getPublicHistory: (params = {}) => req("/public/history" + qs(params)),
   getPublicRoundRules: (id) => req(`/public/rounds/${id}/sections`),
 
@@ -94,6 +96,16 @@ export const api = {
   addTeam: (name, league) =>
     req("/teams", { method: "POST", body: JSON.stringify({ name, league }) }),
   deleteTeam: (id) => req(`/teams/${id}`, { method: "DELETE" }),
+
+  // ---------- Super teams ----------
+  getSuperTeams: () => req("/super-teams"),
+  getSuperTeam: (id) => req(`/super-teams/${id}`),
+  getSuperTeamLeaderboard: () => req("/super-teams/leaderboard"),
+  createSuperTeam: (team_ids) =>
+    req("/super-teams", { method: "POST", body: JSON.stringify({ team_ids }) }),
+  updateSuperTeam: (id, team_ids) =>
+    req(`/super-teams/${id}`, { method: "PUT", body: JSON.stringify({ team_ids }) }),
+  deleteSuperTeam: (id) => req(`/super-teams/${id}`, { method: "DELETE" }),
 
   // ---------- Rounds & rule builder ----------
   getRounds: (league) => req("/rounds" + qs({ league })),

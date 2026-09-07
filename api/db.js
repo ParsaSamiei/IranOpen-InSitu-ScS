@@ -1,6 +1,6 @@
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
-const { LEAGUES } = require("./constants");
+const { LEAGUES, ROUND_LEAGUES } = require("./constants");
 
 // Vercel/Neon Postgres connection string, set in your Vercel project's
 // Environment Variables as DATABASE_URL. For local dev, put it in root `.env`.
@@ -18,6 +18,7 @@ const pool = new Pool({
 });
 
 const leagueCheck = LEAGUES.map((l) => `'${l.replace(/'/g, "''")}'`).join(", ");
+const roundLeagueCheck = ROUND_LEAGUES.map((l) => `'${l.replace(/'/g, "''")}'`).join(", ");
 
 const DEFAULT_SETTINGS = {
   competition_name: "مسابقات ایران‌اپن — لیگ طراحی و ساخت",
@@ -78,7 +79,7 @@ function initDb() {
 
         CREATE TABLE IF NOT EXISTS rounds (
           id SERIAL PRIMARY KEY,
-          league TEXT NOT NULL CHECK (league IN (${leagueCheck})),
+          league TEXT NOT NULL CHECK (league IN (${roundLeagueCheck})),
           round_number INTEGER NOT NULL,
           label TEXT,
           requires_timer BOOLEAN NOT NULL DEFAULT true,
@@ -86,6 +87,7 @@ function initDb() {
           floor_negative_total_to_zero BOOLEAN NOT NULL DEFAULT false,
           allows_multiple_tries BOOLEAN NOT NULL DEFAULT false,
           scores_visible BOOLEAN NOT NULL DEFAULT true,
+          is_superteam BOOLEAN NOT NULL DEFAULT false,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMP DEFAULT NOW(),
           UNIQUE (league, round_number)
@@ -120,9 +122,26 @@ function initDb() {
           created_at TIMESTAMP DEFAULT NOW()
         );
 
+        CREATE TABLE IF NOT EXISTS super_teams (
+          id SERIAL PRIMARY KEY,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS super_team_members (
+          super_team_id INTEGER NOT NULL REFERENCES super_teams(id) ON DELETE CASCADE,
+          team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (super_team_id, team_id),
+          UNIQUE (team_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_super_team_members_team ON super_team_members(team_id);
+        CREATE INDEX IF NOT EXISTS idx_super_team_members_super ON super_team_members(super_team_id);
+
         CREATE TABLE IF NOT EXISTS score_entries (
           id SERIAL PRIMARY KEY,
-          team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE,
+          super_team_id INTEGER REFERENCES super_teams(id) ON DELETE CASCADE,
           round_id INTEGER NOT NULL REFERENCES rounds(id) ON DELETE RESTRICT,
           values_json TEXT NOT NULL,
           section_totals_json TEXT NOT NULL,
@@ -133,10 +152,15 @@ function initDb() {
           captain_signature TEXT,
           created_at TIMESTAMP DEFAULT NOW(),
           updated_at TIMESTAMP DEFAULT NOW(),
-          updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+          updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          CONSTRAINT score_entries_participant_xor CHECK (
+            (team_id IS NOT NULL AND super_team_id IS NULL)
+            OR (team_id IS NULL AND super_team_id IS NOT NULL)
+          )
         );
 
         CREATE INDEX IF NOT EXISTS idx_score_entries_team ON score_entries(team_id);
+        CREATE INDEX IF NOT EXISTS idx_score_entries_super_team ON score_entries(super_team_id);
         CREATE INDEX IF NOT EXISTS idx_score_entries_round ON score_entries(round_id);
         CREATE INDEX IF NOT EXISTS idx_rule_sections_round ON rule_sections(round_id);
         CREATE INDEX IF NOT EXISTS idx_rule_items_section ON rule_items(section_id);
@@ -159,6 +183,57 @@ function initDb() {
       await client.query(`
         ALTER TABLE rounds
         ADD COLUMN IF NOT EXISTS scores_visible BOOLEAN NOT NULL DEFAULT true
+      `);
+      await client.query(`
+        ALTER TABLE rounds
+        ADD COLUMN IF NOT EXISTS is_superteam BOOLEAN NOT NULL DEFAULT false
+      `);
+
+      // Expand rounds.league CHECK so the shared Superteam round can live in
+      // the سوپرتیم bucket (existing DBs still have the old two-league check).
+      await client.query(`
+        DO $$
+        DECLARE
+          con_name text;
+        BEGIN
+          SELECT c.conname INTO con_name
+          FROM pg_constraint c
+          JOIN pg_class t ON c.conrelid = t.oid
+          WHERE t.relname = 'rounds' AND c.contype = 'c' AND pg_get_constraintdef(c.oid) ILIKE '%league%';
+          IF con_name IS NOT NULL THEN
+            EXECUTE format('ALTER TABLE rounds DROP CONSTRAINT %I', con_name);
+          END IF;
+          ALTER TABLE rounds
+            ADD CONSTRAINT rounds_league_check
+            CHECK (league IN (${roundLeagueCheck}));
+        END $$;
+      `);
+
+      // Superteam score rows use super_team_id instead of team_id.
+      await client.query(`
+        ALTER TABLE score_entries
+        ALTER COLUMN team_id DROP NOT NULL
+      `);
+      await client.query(`
+        ALTER TABLE score_entries
+        ADD COLUMN IF NOT EXISTS super_team_id INTEGER REFERENCES super_teams(id) ON DELETE CASCADE
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_score_entries_super_team ON score_entries(super_team_id)
+      `);
+      await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'score_entries_participant_xor'
+          ) THEN
+            ALTER TABLE score_entries
+              ADD CONSTRAINT score_entries_participant_xor CHECK (
+                (team_id IS NOT NULL AND super_team_id IS NULL)
+                OR (team_id IS NULL AND super_team_id IS NOT NULL)
+              );
+          END IF;
+        END $$;
       `);
 
       await ensureDefaultSettings();

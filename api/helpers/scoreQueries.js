@@ -1,47 +1,71 @@
 const { pool } = require('../db');
+const { SUPERTEAM_LEAGUE } = require('../constants');
+const { formatSuperTeamName, loadSuperTeamMembers } = require('./superTeamQueries');
 
 // Shared by /api/scores (admin, includeJudge=true) and /api/public/history
 // (includeJudge=false, per the migration plan's public-sanitization rule).
 // When forPublic is true, rounds with scores_visible=false are returned with
 // score payloads scrubbed so callers cannot recover hidden values.
-async function listScores({ team_id, round_id, league, includeJudge, forPublic = false }) {
+async function listScores({ team_id, super_team_id, round_id, league, includeJudge, forPublic = false }) {
   let sql = `
-    SELECT s.id, s.team_id, t.name AS team_name, t.league,
+    SELECT s.id, s.team_id, s.super_team_id,
+           t.name AS team_name, t.league AS team_league,
            s.round_id, r.round_number, r.label AS round_label,
+           r.league AS round_league, r.is_superteam,
            r.allows_multiple_tries, r.scores_visible,
            s.values_json, s.section_totals_json, s.final_total,
            s.round_time_seconds, s.captain_name, s.captain_signature,
            s.created_at, s.updated_at,
            CASE WHEN r.allows_multiple_tries THEN
              ROW_NUMBER() OVER (
-               PARTITION BY s.team_id, s.round_id
+               PARTITION BY COALESCE(s.team_id, -s.super_team_id), s.round_id
                ORDER BY s.created_at ASC, s.id ASC
              )
            ELSE NULL END AS try_number
            ${includeJudge ? ', s.judge_name' : ''}
     FROM score_entries s
-    JOIN teams t ON t.id = s.team_id
+    LEFT JOIN teams t ON t.id = s.team_id
     JOIN rounds r ON r.id = s.round_id
     WHERE 1=1
   `;
   const params = [];
   if (team_id) { params.push(team_id); sql += ` AND s.team_id = $${params.length}`; }
+  if (super_team_id) { params.push(super_team_id); sql += ` AND s.super_team_id = $${params.length}`; }
   if (round_id) { params.push(round_id); sql += ` AND s.round_id = $${params.length}`; }
-  if (league) { params.push(league); sql += ` AND t.league = $${params.length}`; }
+  if (league === SUPERTEAM_LEAGUE) {
+    sql += ` AND (r.is_superteam = true OR r.league = $${params.length + 1})`;
+    params.push(SUPERTEAM_LEAGUE);
+  } else if (league) {
+    params.push(league);
+    sql += ` AND t.league = $${params.length} AND s.team_id IS NOT NULL AND COALESCE(r.is_superteam, false) = false`;
+  }
   sql += ' ORDER BY s.created_at DESC';
 
   const { rows } = await pool.query(sql, params);
+  const superIds = [...new Set(rows.map((r) => r.super_team_id).filter(Boolean))];
+  const membersById = superIds.length
+    ? await loadSuperTeamMembers(superIds)
+    : new Map();
+
   return rows.map((r) => {
     const scoresVisible = r.scores_visible !== false;
+    const isSuper = !!r.super_team_id;
+    const members = isSuper ? (membersById.get(r.super_team_id) || []) : [];
+    const displayName = isSuper ? formatSuperTeamName(members) : r.team_name;
+    const displayLeague = isSuper ? SUPERTEAM_LEAGUE : r.team_league;
+
     if (forPublic && !scoresVisible) {
       return {
         id: r.id,
         team_id: r.team_id,
-        team_name: r.team_name,
-        league: r.league,
+        super_team_id: r.super_team_id,
+        team_name: displayName,
+        members: isSuper ? members : undefined,
+        league: displayLeague,
         round_id: r.round_id,
         round_number: r.round_number,
         round_label: r.round_label,
+        is_superteam: !!r.is_superteam || isSuper,
         allows_multiple_tries: r.allows_multiple_tries,
         scores_visible: false,
         scores_hidden: true,
@@ -58,6 +82,10 @@ async function listScores({ team_id, round_id, league, includeJudge, forPublic =
     }
     return {
       ...r,
+      team_name: displayName,
+      members: isSuper ? members : undefined,
+      league: displayLeague,
+      is_superteam: !!r.is_superteam || isSuper,
       scores_visible: scoresVisible,
       values_json: JSON.parse(r.values_json),
       section_totals_json: JSON.parse(r.section_totals_json),
@@ -76,6 +104,7 @@ async function listScores({ team_id, round_id, league, includeJudge, forPublic =
 //     played:false
 //   - ties on total normalized score are broken by the team's summed round
 //     time (lower = better, missing times count as 0), then by name
+//   - Superteam rounds are excluded; they have their own leaderboard
 //
 // When forPublic is true:
 //   - rounds with scores_visible=false still appear as columns but with
@@ -98,9 +127,12 @@ async function leaderboard({ league, forPublic = false }) {
 
   const { rows: rounds } = await pool.query(
     `SELECT id, league, round_number, label, sort_order, scores_visible
-     FROM rounds WHERE league = ANY($1)
+     FROM rounds
+     WHERE league = ANY($1)
+       AND COALESCE(is_superteam, false) = false
+       AND league <> $2
      ORDER BY sort_order, round_number`,
-    [leagues]
+    [leagues, SUPERTEAM_LEAGUE]
   );
 
   const { rows: entries } = await pool.query(
@@ -111,6 +143,9 @@ async function leaderboard({ league, forPublic = false }) {
       FROM score_entries s
       JOIN rounds r ON r.id = s.round_id
       WHERE r.league = ANY($1)
+        AND s.team_id IS NOT NULL
+        AND COALESCE(r.is_superteam, false) = false
+        AND r.league <> $2
       ORDER BY s.team_id, s.round_id,
         CASE WHEN r.allows_multiple_tries THEN s.final_total END DESC NULLS LAST,
         CASE WHEN r.allows_multiple_tries THEN COALESCE(s.round_time_seconds, 1e12) END ASC,
@@ -129,7 +164,7 @@ async function leaderboard({ league, forPublic = false }) {
     FROM latest_entries le
     JOIN round_best rb ON rb.round_id = le.round_id
     `,
-    [leagues]
+    [leagues, SUPERTEAM_LEAGUE]
   );
 
   const entryMap = new Map();

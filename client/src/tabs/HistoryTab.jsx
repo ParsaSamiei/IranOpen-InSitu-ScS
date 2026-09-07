@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { useAsync } from '../hooks/useAsync.js';
 import { formatRoundTime, ScoreNum } from '../formatScore.jsx';
 import ScoreRecordModal from '../components/ScoreRecordModal.jsx';
-import { LEAGUES } from '../constants.js';
+import { LEAGUES, ROUND_LEAGUES, SUPERTEAM_LEAGUE } from '../constants.js';
 
 export default function HistoryTab() {
   const [league, setLeague] = useState(LEAGUES[0]);
@@ -11,6 +11,7 @@ export default function HistoryTab() {
   const [modal, setModal] = useState(null); // { mode: 'view' | 'edit', record }
 
   const showTryCol = (scores || []).some((s) => s.allows_multiple_tries);
+  const isSuperHistory = league === SUPERTEAM_LEAGUE;
 
   const remove = async (id) => {
     if (!confirm('حذف این رکورد امتیاز؟')) return;
@@ -22,7 +23,7 @@ export default function HistoryTab() {
     <div className="tab-content">
       <h2>سوابق امتیازات</h2>
       <select value={league} onChange={(e) => setLeague(e.target.value)}>
-        {LEAGUES.map((l) => <option key={l} value={l}>{l}</option>)}
+        {ROUND_LEAGUES.map((l) => <option key={l} value={l}>{l}</option>)}
       </select>
 
       {loading && <p>در حال بارگذاری...</p>}
@@ -31,7 +32,7 @@ export default function HistoryTab() {
       <table className="score-table">
         <thead>
           <tr>
-            <th>تیم</th>
+            <th>{isSuperHistory ? 'سوپرتیم' : 'تیم'}</th>
             <th>راند</th>
             {showTryCol && <th>تلاش</th>}
             <th>زمان</th>

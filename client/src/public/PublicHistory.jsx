@@ -3,15 +3,29 @@ import { api } from '../api.js';
 import { useAsync } from '../hooks/useAsync.js';
 import { formatRoundTime, ScoreNum } from '../formatScore.jsx';
 import ScoreRecordModal from '../components/ScoreRecordModal.jsx';
-import { LEAGUES } from '../constants.js';
+import { LEAGUES, ROUND_LEAGUES, SUPERTEAM_LEAGUE } from '../constants.js';
 
 export default function PublicHistory() {
   const [league, setLeague] = useState(LEAGUES[0]);
-  const [teamId, setTeamId] = useState('');
-  const [{ data: teams }] = useAsync(() => api.getPublicTeams(league), [league]);
+  const [participantId, setParticipantId] = useState('');
+  const isSuperHistory = league === SUPERTEAM_LEAGUE;
+
+  const [{ data: teams }] = useAsync(
+    () => (isSuperHistory ? Promise.resolve([]) : api.getPublicTeams(league)),
+    [league, isSuperHistory]
+  );
+  const [{ data: superTeams }] = useAsync(
+    () => (isSuperHistory ? api.getPublicSuperTeams() : Promise.resolve([])),
+    [isSuperHistory]
+  );
   const [{ data: scores, loading }] = useAsync(
-    () => api.getPublicHistory({ league, team_id: teamId || undefined }),
-    [league, teamId]
+    () => api.getPublicHistory({
+      league,
+      ...(isSuperHistory
+        ? { super_team_id: participantId || undefined }
+        : { team_id: participantId || undefined }),
+    }),
+    [league, participantId, isSuperHistory]
   );
   const [record, setRecord] = useState(null);
   const showTryCol = (scores || []).some((s) => s.allows_multiple_tries);
@@ -20,12 +34,18 @@ export default function PublicHistory() {
     <div className="tab-content">
       <h2>سوابق امتیازات</h2>
       <div className="team-filter-row">
-        <select value={league} onChange={(e) => { setLeague(e.target.value); setTeamId(''); }}>
-          {LEAGUES.map((l) => <option key={l} value={l}>{l}</option>)}
+        <select value={league} onChange={(e) => { setLeague(e.target.value); setParticipantId(''); }}>
+          {ROUND_LEAGUES.map((l) => <option key={l} value={l}>{l}</option>)}
         </select>
-        <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-          <option value="">همه تیم‌ها</option>
-          {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        <select value={participantId} onChange={(e) => setParticipantId(e.target.value)}>
+          <option value="">{isSuperHistory ? 'همه سوپرتیم‌ها' : 'همه تیم‌ها'}</option>
+          {isSuperHistory
+            ? (superTeams || []).map((t) => (
+              <option key={t.id} value={t.id}>{t.name || `سوپرتیم #${t.id}`}</option>
+            ))
+            : (teams || []).map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
         </select>
       </div>
 
@@ -35,7 +55,7 @@ export default function PublicHistory() {
       <table className="score-table">
         <thead>
           <tr>
-            <th>تیم</th>
+            <th>{isSuperHistory ? 'سوپرتیم' : 'تیم'}</th>
             <th>راند</th>
             {showTryCol && <th>تلاش</th>}
             <th>زمان</th>

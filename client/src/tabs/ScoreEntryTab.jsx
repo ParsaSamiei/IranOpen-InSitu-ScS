@@ -5,7 +5,7 @@ import ScoreForm from '../ScoreForm.jsx';
 import SignaturePad from '../SignaturePad.jsx';
 import { formatRoundTime, roundTimeToSeconds, ScoreNum } from '../formatScore.jsx';
 import { calcRoundTotals } from '../scoreCalc.js';
-import { LEAGUES } from '../constants.js';
+import { LEAGUES, SUPERTEAM_LEAGUE, ROUND_LEAGUES } from '../constants.js';
 
 function SavedTrySheet({ tryRecord, sections, tryNumber }) {
   return (
@@ -27,9 +27,18 @@ function SavedTrySheet({ tryRecord, sections, tryNumber }) {
 
 export default function ScoreEntryTab() {
   const [league, setLeague] = useState(LEAGUES[0]);
-  const [{ data: teams }] = useAsync(() => api.getTeams(league), [league]);
+  const isSuperMode = league === SUPERTEAM_LEAGUE;
+  const [{ data: teams }] = useAsync(
+    () => (isSuperMode ? Promise.resolve([]) : api.getTeams(league)),
+    [league, isSuperMode]
+  );
+  const [{ data: superTeams }] = useAsync(
+    () => (isSuperMode ? api.getSuperTeams() : Promise.resolve([])),
+    [isSuperMode]
+  );
   const [{ data: rounds }] = useAsync(() => api.getRounds(league), [league]);
   const [teamId, setTeamId] = useState('');
+  const [superTeamId, setSuperTeamId] = useState('');
   const [roundId, setRoundId] = useState('');
   const [judge, setJudge] = useState('');
   const [roundMinutes, setRoundMinutes] = useState('');
@@ -69,12 +78,18 @@ export default function ScoreEntryTab() {
   const allowsMultipleTries = !!round?.allows_multiple_tries;
 
   const [{ data: existingTriesRaw, loading: triesLoading }, reloadTries] = useAsync(
-    () => (
-      allowsMultipleTries && teamId && roundId
+    () => {
+      if (!allowsMultipleTries || !roundId) return Promise.resolve([]);
+      if (isSuperMode) {
+        return superTeamId
+          ? api.getScores({ super_team_id: superTeamId, round_id: roundId })
+          : Promise.resolve([]);
+      }
+      return teamId
         ? api.getScores({ team_id: teamId, round_id: roundId })
-        : Promise.resolve([])
-    ),
-    [allowsMultipleTries, teamId, roundId]
+        : Promise.resolve([]);
+    },
+    [allowsMultipleTries, teamId, superTeamId, roundId, isSuperMode]
   );
 
   const existingTries = useMemo(() => {
@@ -120,6 +135,12 @@ export default function ScoreEntryTab() {
   };
 
   const selectedTeam = (teams || []).find((t) => String(t.id) === String(teamId));
+  const selectedSuperTeam = (superTeams || []).find((t) => String(t.id) === String(superTeamId));
+  const participantSelected = isSuperMode ? !!superTeamId : !!teamId;
+  const participantName = isSuperMode
+    ? (selectedSuperTeam?.name || '—')
+    : (selectedTeam?.name || '—');
+  const captainLabel = isSuperMode ? 'کاپیتان سوپرتیم' : 'کاپیتان تیم';
 
   const previewTotals = useMemo(() => calcRoundTotals(sections, values, round), [sections, values, round]);
 
@@ -136,24 +157,25 @@ export default function ScoreEntryTab() {
     }
   };
 
-  // Reset everything (including team) whenever the league changes.
+  // Reset everything (including participant) whenever the league/mode changes.
   useEffect(() => {
     setTeamId('');
+    setSuperTeamId('');
     clearSheetFields();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [league]);
 
-  // Clear sheet when switching rounds (team stays selected).
+  // Clear sheet when switching rounds (participant stays selected).
   useEffect(() => {
     clearSheetFields();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roundId]);
 
-  // New team → fresh signature context.
+  // New participant → fresh signature context.
   useEffect(() => {
     clearSheetFields();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamId]);
+  }, [teamId, superTeamId]);
 
   const advanceToNextRound = () => {
     if (!rounds || !round) return;
@@ -163,7 +185,10 @@ export default function ScoreEntryTab() {
   };
 
   const openConfirm = () => {
-    if (!teamId) { setMessage('لطفا تیم را انتخاب کنید'); return; }
+    if (!participantSelected) {
+      setMessage(isSuperMode ? 'لطفا سوپرتیم را انتخاب کنید' : 'لطفا تیم را انتخاب کنید');
+      return;
+    }
     if (!roundId) { setMessage('لطفا راند را انتخاب کنید'); return; }
     setMessage('');
     setConfirmOpen(true);
@@ -171,12 +196,14 @@ export default function ScoreEntryTab() {
 
   const needsSignature = !!round?.requires_captain_signature;
   const needsTimer = !!round?.requires_timer;
-  // Multi-try: signature once for the team+round; later tries reuse it.
+  // Multi-try: signature once for the participant+round; later tries reuse it.
   const needsSignatureNow = needsSignature && !(allowsMultipleTries && hasSharedSignature);
 
   const save = async () => {
     if (needsSignatureNow && !captainSignature) {
-      setMessage('برای ثبت راند، کاپیتان تیم باید امضا کند');
+      setMessage(isSuperMode
+        ? 'برای ثبت راند، کاپیتان سوپرتیم باید امضا کند'
+        : 'برای ثبت راند، کاپیتان تیم باید امضا کند');
       return;
     }
     setSaving(true);
@@ -184,7 +211,7 @@ export default function ScoreEntryTab() {
     try {
       const round_time_seconds = roundTimeToSeconds(roundMinutes, roundSeconds, roundTenths);
       await api.addScore({
-        team_id: teamId,
+        ...(isSuperMode ? { super_team_id: superTeamId } : { team_id: teamId }),
         round_id: roundId,
         values,
         judge_name: judge,
@@ -217,25 +244,37 @@ export default function ScoreEntryTab() {
     }
   };
 
-  const showForm = !rulesLoading && sections.length > 0 && (!allowsMultipleTries || !!teamId);
+  const showForm = !rulesLoading && sections.length > 0 && (!allowsMultipleTries || participantSelected);
 
   return (
     <div className="tab-content">
       <h2>ثبت امتیاز راند</h2>
       <div className="entry-controls">
         <label className="entry-field">
-          <span className="entry-field-label">لیگ</span>
+          <span className="entry-field-label">لیگ / حالت</span>
           <select value={league} onChange={(e) => setLeague(e.target.value)}>
-            {LEAGUES.map((l) => <option key={l} value={l}>{l}</option>)}
+            {ROUND_LEAGUES.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>
         </label>
-        <label className="entry-field entry-field--team">
-          <span className="entry-field-label">تیم</span>
-          <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-            <option value="">-- انتخاب تیم --</option>
-            {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </label>
+        {isSuperMode ? (
+          <label className="entry-field entry-field--team">
+            <span className="entry-field-label">سوپرتیم</span>
+            <select value={superTeamId} onChange={(e) => setSuperTeamId(e.target.value)}>
+              <option value="">-- انتخاب سوپرتیم --</option>
+              {(superTeams || []).map((t) => (
+                <option key={t.id} value={t.id}>{t.name || `سوپرتیم #${t.id}`}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label className="entry-field entry-field--team">
+            <span className="entry-field-label">تیم</span>
+            <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">-- انتخاب تیم --</option>
+              {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </label>
+        )}
         <label className="entry-field entry-field--round">
           <span className="entry-field-label">راند</span>
           <select value={roundId} onChange={(e) => setRoundId(e.target.value)}>
@@ -301,7 +340,7 @@ export default function ScoreEntryTab() {
         <p className="muted">برای این راند هنوز بخش یا آیتمی در قوانین امتیازدهی تعریف نشده است. از تب «قوانین امتیازدهی» آن را تنظیم کنید.</p>
       )}
 
-      {allowsMultipleTries && teamId && (
+      {allowsMultipleTries && participantSelected && (
         <div className="prior-tries">
           {triesLoading && <p className="muted">در حال بارگذاری تلاش‌های قبلی...</p>}
           {!triesLoading && existingTries.map((t, i) => (
@@ -315,8 +354,12 @@ export default function ScoreEntryTab() {
         </div>
       )}
 
-      {allowsMultipleTries && !teamId && sections.length > 0 && (
-        <p className="muted">برای دیدن تلاش‌ها و ثبت تلاش جدید، ابتدا تیم را انتخاب کنید.</p>
+      {allowsMultipleTries && !participantSelected && sections.length > 0 && (
+        <p className="muted">
+          {isSuperMode
+            ? 'برای دیدن تلاش‌ها و ثبت تلاش جدید، ابتدا سوپرتیم را انتخاب کنید.'
+            : 'برای دیدن تلاش‌ها و ثبت تلاش جدید، ابتدا تیم را انتخاب کنید.'}
+        </p>
       )}
 
       {showForm && (
@@ -358,7 +401,7 @@ export default function ScoreEntryTab() {
 
       {showForm && (
         <div className="save-row">
-          <button disabled={saving || !roundId || !teamId} onClick={openConfirm} className="primary">
+          <button disabled={saving || !roundId || !participantSelected} onClick={openConfirm} className="primary">
             {allowsMultipleTries ? `بررسی و ثبت تلاش ${nextTryNumber}` : 'بررسی و ثبت امتیاز'}
           </button>
           {message && <span className={message.startsWith('خطا') ? 'error' : 'message'}>{message}</span>}
@@ -375,8 +418,8 @@ export default function ScoreEntryTab() {
             </h3>
             <p className="confirm-hint">لطفاً قبل از ذخیره، اطلاعات زیر را یک‌بار دیگر بررسی کنید.</p>
             <dl className="confirm-summary">
-              <div><dt>تیم</dt><dd>{selectedTeam?.name || '—'}</dd></div>
-              <div><dt>لیگ</dt><dd>{league}</dd></div>
+              <div><dt>{isSuperMode ? 'سوپرتیم' : 'تیم'}</dt><dd>{participantName}</dd></div>
+              <div><dt>لیگ / حالت</dt><dd>{league}</dd></div>
               <div><dt>راند</dt><dd>{round?.label || `راند ${round?.round_number}`}</dd></div>
               {allowsMultipleTries && (
                 <div><dt>شماره تلاش</dt><dd>{nextTryNumber}</dd></div>
@@ -393,29 +436,29 @@ export default function ScoreEntryTab() {
             {needsSignatureNow ? (
               <div className="signature-block">
                 <label className="signature-name-label">
-                  <span>نام کاپیتان تیم</span>
+                  <span>نام {captainLabel}</span>
                   <input value={captainName} onChange={(e) => setCaptainName(e.target.value)} placeholder="نام و نام خانوادگی" />
                 </label>
                 <p className="confirm-hint">
                   {allowsMultipleTries
-                    ? 'این امضا برای همه تلاش‌های این تیم در این راند معتبر است.'
-                    : 'کاپیتان تیم با امضای زیر، صحت امتیازهای ثبت‌شده در این راند را تایید می‌کند.'}
+                    ? `این امضا برای همه تلاش‌های این ${isSuperMode ? 'سوپرتیم' : 'تیم'} در این راند معتبر است.`
+                    : `${captainLabel} با امضای زیر، صحت امتیازهای ثبت‌شده در این راند را تایید می‌کند.`}
                 </p>
                 <SignaturePad value={captainSignature} onChange={setCaptainSignature} />
               </div>
             ) : needsSignature && hasSharedSignature ? (
               <div className="signature-block signature-block-readonly">
                 <div className="signature-readonly-name">
-                  <span>کاپیتان تیم</span>
+                  <span>{captainLabel}</span>
                   <strong>{sharedSignatureTry.captain_name || '—'}</strong>
                 </div>
-                <img src={sharedSignatureTry.captain_signature} alt="امضای کاپیتان تیم" className="signature-preview" />
+                <img src={sharedSignatureTry.captain_signature} alt={`امضای ${captainLabel}`} className="signature-preview" />
                 <span className="signature-hint">امضا قبلاً برای تلاش‌های این راند ثبت شده است</span>
               </div>
             ) : (
               <div className="signature-block">
                 <label className="signature-name-label">
-                  <span>نام کاپیتان تیم (اختیاری)</span>
+                  <span>نام {captainLabel} (اختیاری)</span>
                   <input value={captainName} onChange={(e) => setCaptainName(e.target.value)} placeholder="نام و نام خانوادگی" />
                 </label>
               </div>
@@ -427,7 +470,7 @@ export default function ScoreEntryTab() {
                 className="primary"
                 disabled={saving || (needsSignatureNow && !captainSignature)}
                 onClick={save}
-                title={needsSignatureNow && !captainSignature ? 'ابتدا کاپیتان تیم باید امضا کند' : undefined}
+                title={needsSignatureNow && !captainSignature ? `ابتدا ${captainLabel} باید امضا کند` : undefined}
               >
                 {saving ? 'در حال ذخیره...' : 'بله، ذخیره شود'}
               </button>

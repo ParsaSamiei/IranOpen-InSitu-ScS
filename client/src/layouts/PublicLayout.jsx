@@ -44,6 +44,12 @@ export default function PublicLayout() {
             رده‌بندی
           </NavLink>
           <NavLink
+            to="/super-teams"
+            className={({ isActive }) => (isActive ? "active" : "")}
+          >
+            سوپرتیم
+          </NavLink>
+          <NavLink
             to="/history"
             className={({ isActive }) => (isActive ? "active" : "")}
           >

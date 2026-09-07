@@ -1,9 +1,10 @@
 const express = require("express");
 const XLSX = require("xlsx");
 const { pool } = require("../db");
-const { LEAGUES } = require("../constants");
+const { SUPERTEAM_LEAGUE, ROUND_LEAGUES } = require("../constants");
 const { loadRoundRules } = require("../rulesEngine");
 const { leaderboard } = require("../helpers/scoreQueries");
+const { superTeamLeaderboard, formatSuperTeamName, loadSuperTeamMembers } = require("../helpers/superTeamQueries");
 
 const router = express.Router();
 
@@ -47,29 +48,44 @@ async function buildRoundSheet(round, usedNames) {
     })),
   );
 
+  const isSuper = !!round.is_superteam || round.league === SUPERTEAM_LEAGUE;
   const { rows: scoreRows } = await pool.query(
-    `SELECT s.*, t.name AS team_name
-     FROM score_entries s JOIN teams t ON t.id = s.team_id
-     WHERE s.round_id = $1
-     ORDER BY t.name, s.created_at`,
+    isSuper
+      ? `SELECT s.*
+         FROM score_entries s
+         WHERE s.round_id = $1 AND s.super_team_id IS NOT NULL
+         ORDER BY s.super_team_id, s.created_at`
+      : `SELECT s.*, t.name AS team_name
+         FROM score_entries s JOIN teams t ON t.id = s.team_id
+         WHERE s.round_id = $1
+         ORDER BY t.name, s.created_at`,
     [round.id],
   );
+
+  let membersById = new Map();
+  if (isSuper) {
+    const ids = [...new Set(scoreRows.map((s) => s.super_team_id).filter(Boolean))];
+    membersById = await loadSuperTeamMembers(ids);
+  }
 
   const sheetRows = scoreRows.map((s, idx) => {
     const values = JSON.parse(s.values_json);
     const sectionTotals = JSON.parse(s.section_totals_json);
+    const displayName = isSuper
+      ? formatSuperTeamName(membersById.get(s.super_team_id) || [])
+      : s.team_name;
     const row = {
-      تیم: s.team_name,
+      [isSuper ? "سوپرتیم" : "تیم"]: displayName,
     };
     if (round.allows_multiple_tries) {
-      // Per-team try index in creation order (same ordering as the query).
-      const teamTryCount = scoreRows
+      const key = isSuper ? "super_team_id" : "team_id";
+      const tryCount = scoreRows
         .slice(0, idx + 1)
-        .filter((x) => x.team_id === s.team_id).length;
-      row['شماره تلاش'] = teamTryCount;
+        .filter((x) => x[key] === s[key]).length;
+      row["شماره تلاش"] = tryCount;
     }
-    row['زمان راند (ثانیه)'] = s.round_time_seconds;
-    row['داور'] = s.judge_name || '';
+    row["زمان راند (ثانیه)"] = s.round_time_seconds;
+    row["داور"] = s.judge_name || "";
     for (const item of flatItems) {
       const raw = values?.[item.sectionKey]?.[item.key];
       row[`${item.sectionLabel} – ${item.label}`] = formatItemValue(item, raw);
@@ -93,7 +109,9 @@ async function buildRoundSheet(round, usedNames) {
 
 router.get("/", async (req, res) => {
   const { league } = req.query;
-  const leaguesToExport = league ? [league] : LEAGUES;
+  const leaguesToExport = league
+    ? [league]
+    : ROUND_LEAGUES;
 
   try {
     const wb = XLSX.utils.book_new();
@@ -109,24 +127,39 @@ router.get("/", async (req, res) => {
         XLSX.utils.book_append_sheet(wb, sheet, name);
       }
 
-      const lbRows = await leaderboard({ league: lg });
-      const lbSheetRows = lbRows.map((r) => {
-        const row = { تیم: r.team_name };
-        for (const rd of r.rounds) {
-          const label = rd.round_label || `راند ${rd.round_number}`;
-          row[`${label} – نرمال`] = rd.played ? rd.normalized_score : "";
-          row[`${label} – خام`] = rd.played ? rd.raw_score : "";
-          row[`${label} – زمان (ثانیه)`] = rd.played ? rd.round_time_seconds : "";
-        }
-        row["مجموع امتیاز نرمال‌شده"] = r.total_normalized;
-        row["تعداد راندهای انجام‌شده"] = `${r.rounds_played} از ${r.total_rounds}`;
-        return row;
-      });
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.json_to_sheet(lbSheetRows),
-        sheetName(`رده‌بندی ${lg}`, usedNames),
-      );
+      if (lg === SUPERTEAM_LEAGUE) {
+        const lbRows = await superTeamLeaderboard();
+        const lbSheetRows = lbRows.map((r) => ({
+          سوپرتیم: r.super_team_name,
+          "تیم‌های عضو": (r.members || []).map((m) => `${m.team_name} (${m.league})`).join(" + "),
+          امتیاز: r.played ? r.raw_score : "",
+          "زمان (ثانیه)": r.played ? r.round_time_seconds : "",
+        }));
+        XLSX.utils.book_append_sheet(
+          wb,
+          XLSX.utils.json_to_sheet(lbSheetRows),
+          sheetName("رده‌بندی سوپرتیم", usedNames),
+        );
+      } else {
+        const lbRows = await leaderboard({ league: lg });
+        const lbSheetRows = lbRows.map((r) => {
+          const row = { تیم: r.team_name };
+          for (const rd of r.rounds) {
+            const label = rd.round_label || `راند ${rd.round_number}`;
+            row[`${label} – نرمال`] = rd.played ? rd.normalized_score : "";
+            row[`${label} – خام`] = rd.played ? rd.raw_score : "";
+            row[`${label} – زمان (ثانیه)`] = rd.played ? rd.round_time_seconds : "";
+          }
+          row["مجموع امتیاز نرمال‌شده"] = r.total_normalized;
+          row["تعداد راندهای انجام‌شده"] = `${r.rounds_played} از ${r.total_rounds}`;
+          return row;
+        });
+        XLSX.utils.book_append_sheet(
+          wb,
+          XLSX.utils.json_to_sheet(lbSheetRows),
+          sheetName(`رده‌بندی ${lg}`, usedNames),
+        );
+      }
     }
 
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });

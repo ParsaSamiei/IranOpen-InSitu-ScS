@@ -4,8 +4,25 @@
 // routes/validation never have to repeat the literal strings.
 const LEAGUES = ['مقدماتی', 'پیشرفته'];
 
+// Virtual league bucket used only for the shared Superteam round (teams from
+// any real league can be paired). Never assigned to rows in `teams`.
+const SUPERTEAM_LEAGUE = 'سوپرتیم';
+
+const ROUND_LEAGUES = [...LEAGUES, SUPERTEAM_LEAGUE];
+
 const ROLES = ['admin', 'super_admin'];
 
 const RULE_ITEM_TYPES = ['binary', 'multi', 'choice', 'scale', 'counter'];
 
-module.exports = { LEAGUES, ROLES, RULE_ITEM_TYPES };
+const SUPERTEAM_MIN_MEMBERS = 2;
+const SUPERTEAM_MAX_MEMBERS = 3;
+
+module.exports = {
+  LEAGUES,
+  SUPERTEAM_LEAGUE,
+  ROUND_LEAGUES,
+  ROLES,
+  RULE_ITEM_TYPES,
+  SUPERTEAM_MIN_MEMBERS,
+  SUPERTEAM_MAX_MEMBERS,
+};

@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { listScores, leaderboard } = require('../helpers/scoreQueries');
+const { listSuperTeams, superTeamLeaderboard } = require('../helpers/superTeamQueries');
 const { loadRoundRules } = require('../rulesEngine');
 
 const router = express.Router();
@@ -20,6 +21,15 @@ router.get('/teams', async (req, res) => {
   res.json(rows);
 });
 
+router.get('/super-teams', async (req, res) => {
+  try {
+    res.json(await listSuperTeams());
+  } catch (err) {
+    console.error('Public super teams query failed:', err);
+    res.status(500).json({ error: 'خطا در بارگذاری سوپرتیم‌ها' });
+  }
+});
+
 router.get('/leaderboard', async (req, res) => {
   try {
     const rows = await leaderboard({ league: req.query.league, forPublic: true });
@@ -30,6 +40,15 @@ router.get('/leaderboard', async (req, res) => {
   }
 });
 
+router.get('/super-teams/leaderboard', async (req, res) => {
+  try {
+    res.json(await superTeamLeaderboard({ forPublic: true }));
+  } catch (err) {
+    console.error('Public super team leaderboard failed:', err);
+    res.status(500).json({ error: 'خطا در بارگذاری رده‌بندی سوپرتیم' });
+  }
+});
+
 // judge_name stripped from the public payload; captain_signature is shown
 // as-is (image included) — resolved in CHANGE_AND_MIGRATION_PLAN.md §7.
 // Rounds with scores_visible=false are returned scrubbed (scores_hidden).
@@ -37,6 +56,7 @@ router.get('/history', async (req, res) => {
   try {
     const rows = await listScores({
       team_id: req.query.team_id,
+      super_team_id: req.query.super_team_id,
       league: req.query.league,
       includeJudge: false,
       forPublic: true,
