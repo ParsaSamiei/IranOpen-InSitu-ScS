@@ -160,7 +160,6 @@ function initDb() {
         );
 
         CREATE INDEX IF NOT EXISTS idx_score_entries_team ON score_entries(team_id);
-        CREATE INDEX IF NOT EXISTS idx_score_entries_super_team ON score_entries(super_team_id);
         CREATE INDEX IF NOT EXISTS idx_score_entries_round ON score_entries(round_id);
         CREATE INDEX IF NOT EXISTS idx_rule_sections_round ON rule_sections(round_id);
         CREATE INDEX IF NOT EXISTS idx_rule_items_section ON rule_items(section_id);
@@ -191,25 +190,47 @@ function initDb() {
 
       // Expand rounds.league CHECK so the shared Superteam round can live in
       // the سوپرتیم bucket (existing DBs still have the old two-league check).
+      // Idempotent: skip when the desired constraint is already in place.
       await client.query(`
         DO $$
         DECLARE
           con_name text;
+          con_def text;
+          desired text := 'CHECK (league IN (${roundLeagueCheck}))';
         BEGIN
-          SELECT c.conname INTO con_name
+          SELECT c.conname, pg_get_constraintdef(c.oid)
+            INTO con_name, con_def
           FROM pg_constraint c
           JOIN pg_class t ON c.conrelid = t.oid
-          WHERE t.relname = 'rounds' AND c.contype = 'c' AND pg_get_constraintdef(c.oid) ILIKE '%league%';
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+          WHERE n.nspname = 'public'
+            AND t.relname = 'rounds'
+            AND c.contype = 'c'
+            AND pg_get_constraintdef(c.oid) ILIKE '%league%'
+          LIMIT 1;
+
+          IF con_def IS NOT NULL AND con_def = desired THEN
+            RETURN;
+          END IF;
+
           IF con_name IS NOT NULL THEN
             EXECUTE format('ALTER TABLE rounds DROP CONSTRAINT %I', con_name);
           END IF;
-          ALTER TABLE rounds
-            ADD CONSTRAINT rounds_league_check
-            CHECK (league IN (${roundLeagueCheck}));
+
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'rounds_league_check'
+          ) THEN
+            ALTER TABLE rounds
+              ADD CONSTRAINT rounds_league_check
+              CHECK (league IN (${roundLeagueCheck}));
+          END IF;
         END $$;
       `);
 
       // Superteam score rows use super_team_id instead of team_id.
+      // Must run before creating the super_team index — on existing DBs the
+      // score_entries table already exists without this column, so the index
+      // cannot be created in the CREATE TABLE IF NOT EXISTS batch above.
       await client.query(`
         ALTER TABLE score_entries
         ALTER COLUMN team_id DROP NOT NULL
