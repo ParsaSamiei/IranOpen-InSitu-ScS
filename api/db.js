@@ -190,40 +190,33 @@ function initDb() {
 
       // Expand rounds.league CHECK so the shared Superteam round can live in
       // the سوپرتیم bucket (existing DBs still have the old two-league check).
-      // Idempotent: skip when the desired constraint is already in place.
+      // Drop any existing league CHECK (name varies) and ensure ours exists.
+      // NOTE: do not embed league values inside a PL/pgSQL string literal — the
+      // Persian quotes would break the SQL parser (that caused the 500s).
       await client.query(`
         DO $$
         DECLARE
-          con_name text;
-          con_def text;
-          desired text := 'CHECK (league IN (${roundLeagueCheck}))';
+          r record;
         BEGIN
-          SELECT c.conname, pg_get_constraintdef(c.oid)
-            INTO con_name, con_def
-          FROM pg_constraint c
-          JOIN pg_class t ON c.conrelid = t.oid
-          JOIN pg_namespace n ON n.oid = t.relnamespace
-          WHERE n.nspname = 'public'
-            AND t.relname = 'rounds'
-            AND c.contype = 'c'
-            AND pg_get_constraintdef(c.oid) ILIKE '%league%'
-          LIMIT 1;
+          FOR r IN
+            SELECT c.conname
+            FROM pg_constraint c
+            JOIN pg_class t ON c.conrelid = t.oid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            WHERE n.nspname = 'public'
+              AND t.relname = 'rounds'
+              AND c.contype = 'c'
+              AND pg_get_constraintdef(c.oid) ILIKE '%league%'
+          LOOP
+            EXECUTE format('ALTER TABLE rounds DROP CONSTRAINT %I', r.conname);
+          END LOOP;
 
-          IF con_def IS NOT NULL AND con_def = desired THEN
-            RETURN;
-          END IF;
-
-          IF con_name IS NOT NULL THEN
-            EXECUTE format('ALTER TABLE rounds DROP CONSTRAINT %I', con_name);
-          END IF;
-
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname = 'rounds_league_check'
-          ) THEN
-            ALTER TABLE rounds
-              ADD CONSTRAINT rounds_league_check
-              CHECK (league IN (${roundLeagueCheck}));
-          END IF;
+          ALTER TABLE rounds
+            ADD CONSTRAINT rounds_league_check
+            CHECK (league IN (${roundLeagueCheck}));
+        EXCEPTION
+          WHEN duplicate_object THEN
+            NULL;
         END $$;
       `);
 
@@ -259,7 +252,11 @@ function initDb() {
 
       await ensureDefaultSettings();
       await ensureBootstrapSuperAdmin();
-    })();
+    })().catch((err) => {
+      // Allow the next request to retry init after a failed migration attempt.
+      initPromise = null;
+      throw err;
+    });
   }
   return initPromise;
 }
