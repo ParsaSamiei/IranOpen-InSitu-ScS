@@ -1,7 +1,7 @@
 const express = require("express");
 const XLSX = require("xlsx");
 const { pool } = require("../db");
-const { SUPERTEAM_LEAGUE, ROUND_LEAGUES } = require("../constants");
+const { SUPERTEAM_LEAGUE, ROUND_LEAGUES, LEAGUES } = require("../constants");
 const { loadRoundRules } = require("../rulesEngine");
 const { leaderboard } = require("../helpers/scoreQueries");
 const { superTeamLeaderboard, formatSuperTeamName, loadSuperTeamMembers } = require("../helpers/superTeamQueries");
@@ -38,7 +38,7 @@ function sheetName(base, used) {
   return candidate;
 }
 
-async function buildRoundSheet(round, usedNames) {
+async function buildRoundSheet(round, usedNames, filterLeague = null) {
   const { sections } = await loadRoundRules(round.id);
   const flatItems = sections.flatMap((sec) =>
     sec.items.map((item) => ({
@@ -49,17 +49,23 @@ async function buildRoundSheet(round, usedNames) {
   );
 
   const isSuper = !!round.is_superteam || round.league === SUPERTEAM_LEAGUE;
+  const filterByLeague = !isSuper && filterLeague && LEAGUES.includes(filterLeague);
   const { rows: scoreRows } = await pool.query(
     isSuper
       ? `SELECT s.*
          FROM score_entries s
          WHERE s.round_id = $1 AND s.super_team_id IS NOT NULL
          ORDER BY s.super_team_id, s.created_at`
-      : `SELECT s.*, t.name AS team_name
-         FROM score_entries s JOIN teams t ON t.id = s.team_id
-         WHERE s.round_id = $1
-         ORDER BY t.name, s.created_at`,
-    [round.id],
+      : filterByLeague
+        ? `SELECT s.*, t.name AS team_name
+           FROM score_entries s JOIN teams t ON t.id = s.team_id
+           WHERE s.round_id = $1 AND t.league = $2
+           ORDER BY t.name, s.created_at`
+        : `SELECT s.*, t.name AS team_name
+           FROM score_entries s JOIN teams t ON t.id = s.team_id
+           WHERE s.round_id = $1
+           ORDER BY t.name, s.created_at`,
+    filterByLeague ? [round.id, filterLeague] : [round.id],
   );
 
   let membersById = new Map();
@@ -103,7 +109,10 @@ async function buildRoundSheet(round, usedNames) {
   });
 
   const label = round.label || `راند ${round.round_number}`;
-  const name = sheetName(`${label}`, usedNames);
+  const sheetLabel = filterByLeague && round.shared_across_leagues
+    ? `${label} (${filterLeague})`
+    : label;
+  const name = sheetName(sheetLabel, usedNames);
   return { name, sheet: XLSX.utils.json_to_sheet(sheetRows) };
 }
 
@@ -118,12 +127,38 @@ router.get("/", async (req, res) => {
     const usedNames = new Set();
 
     for (const lg of leaguesToExport) {
-      const { rows: rounds } = await pool.query(
-        "SELECT * FROM rounds WHERE league = $1 ORDER BY sort_order, round_number",
-        [lg],
-      );
+      let rounds;
+      if (lg === SUPERTEAM_LEAGUE) {
+        ({ rows: rounds } = await pool.query(
+          `SELECT * FROM rounds
+           WHERE league = $1 OR is_superteam = true
+           ORDER BY sort_order, round_number`,
+          [SUPERTEAM_LEAGUE],
+        ));
+      } else if (LEAGUES.includes(lg)) {
+        ({ rows: rounds } = await pool.query(
+          `SELECT * FROM rounds
+           WHERE COALESCE(is_superteam, false) = false
+             AND league <> $2
+             AND (
+               league = $1
+               OR (shared_across_leagues = true AND league = ANY($3::text[]))
+             )
+           ORDER BY sort_order, round_number`,
+          [lg, SUPERTEAM_LEAGUE, LEAGUES],
+        ));
+      } else {
+        ({ rows: rounds } = await pool.query(
+          "SELECT * FROM rounds WHERE league = $1 ORDER BY sort_order, round_number",
+          [lg],
+        ));
+      }
       for (const round of rounds) {
-        const { name, sheet } = await buildRoundSheet(round, usedNames);
+        const { name, sheet } = await buildRoundSheet(
+          round,
+          usedNames,
+          lg === SUPERTEAM_LEAGUE ? null : lg,
+        );
         XLSX.utils.book_append_sheet(wb, sheet, name);
       }
 

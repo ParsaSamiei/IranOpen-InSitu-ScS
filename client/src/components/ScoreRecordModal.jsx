@@ -80,7 +80,7 @@ export default function ScoreRecordModal({ mode, record, onClose, onSaved, publi
         </div>
 
         {loading && <p>در حال بارگذاری قوانین راند...</p>}
-        {rules && <ScoreForm sections={rules.sections} values={values} onValuesChange={setValues} readOnly={readOnly} />}
+        {rules && <ScoreForm sections={rules.sections} values={values} onValuesChange={setValues} readOnly={readOnly} round={rules.round} />}
         {!loading && !rules && (
           <p className="error">قوانین این راند بارگذاری نشد؛ امتیاز نهایی ثبت‌شده: <ScoreNum value={record.final_total} /></p>
         )}

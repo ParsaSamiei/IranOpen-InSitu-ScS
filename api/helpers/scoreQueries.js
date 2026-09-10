@@ -1,6 +1,22 @@
 const { pool } = require('../db');
-const { SUPERTEAM_LEAGUE } = require('../constants');
+const { LEAGUES, SUPERTEAM_LEAGUE } = require('../constants');
 const { formatSuperTeamName, loadSuperTeamMembers } = require('./superTeamQueries');
+
+// Rounds that apply to a real league: home-league rounds plus shared rounds
+// from either real league (سوپرتیم excluded).
+function roundsForLeagueSql() {
+  return `
+    SELECT id, league, round_number, label, sort_order, scores_visible, shared_across_leagues
+    FROM rounds
+    WHERE COALESCE(is_superteam, false) = false
+      AND league <> $2
+      AND (
+        league = ANY($1::text[])
+        OR (shared_across_leagues = true AND league = ANY($3::text[]))
+      )
+    ORDER BY sort_order, round_number
+  `;
+}
 
 // Shared by /api/scores (admin, includeJudge=true) and /api/public/history
 // (includeJudge=false, per the migration plan's public-sanitization rule).
@@ -97,8 +113,8 @@ async function listScores({ team_id, super_team_id, round_id, league, includeJud
 // Standings, per the new scoring rules:
 //   - every round a team has played is shown, not just their best one
 //   - ranking is by the TOTAL of each round's NORMALIZED score (best score in
-//     that round = 100, everyone else scaled proportionally against it),
-//     not by a single best round
+//     that round = rounds.normalize_to, default 100; everyone else scaled
+//     proportionally against it), not by a single best round
 //   - a round the team hasn't played yet counts as 0 toward the total (per
 //     product decision), so it still shows up as a column/entry with
 //     played:false
@@ -126,26 +142,27 @@ async function leaderboard({ league, forPublic = false }) {
   const leagues = [...new Set(teams.map((t) => t.league))];
 
   const { rows: rounds } = await pool.query(
-    `SELECT id, league, round_number, label, sort_order, scores_visible
-     FROM rounds
-     WHERE league = ANY($1)
-       AND COALESCE(is_superteam, false) = false
-       AND league <> $2
-     ORDER BY sort_order, round_number`,
-    [leagues, SUPERTEAM_LEAGUE]
+    roundsForLeagueSql(),
+    [leagues, SUPERTEAM_LEAGUE, LEAGUES]
   );
 
+  // Normalize within each team league so a shared round does not mix standings.
   const { rows: entries } = await pool.query(
     `
     WITH latest_entries AS (
       SELECT DISTINCT ON (s.team_id, s.round_id)
-        s.team_id, s.round_id, s.final_total, s.round_time_seconds
+        s.team_id, t.league AS team_league, s.round_id, s.final_total, s.round_time_seconds
       FROM score_entries s
+      JOIN teams t ON t.id = s.team_id
       JOIN rounds r ON r.id = s.round_id
-      WHERE r.league = ANY($1)
+      WHERE t.league = ANY($1::text[])
         AND s.team_id IS NOT NULL
         AND COALESCE(r.is_superteam, false) = false
         AND r.league <> $2
+        AND (
+          r.league = ANY($1::text[])
+          OR (r.shared_across_leagues = true AND r.league = ANY($3::text[]))
+        )
       ORDER BY s.team_id, s.round_id,
         CASE WHEN r.allows_multiple_tries THEN s.final_total END DESC NULLS LAST,
         CASE WHEN r.allows_multiple_tries THEN COALESCE(s.round_time_seconds, 1e12) END ASC,
@@ -153,27 +170,42 @@ async function leaderboard({ league, forPublic = false }) {
         s.id DESC
     ),
     round_best AS (
-      SELECT round_id, MAX(final_total) AS best_score
+      SELECT team_league, round_id, MAX(final_total) AS best_score
       FROM latest_entries
-      GROUP BY round_id
+      GROUP BY team_league, round_id
     )
     SELECT le.team_id, le.round_id, le.final_total AS raw_score, le.round_time_seconds,
            CASE WHEN rb.best_score > 0
-                THEN ROUND((le.final_total / rb.best_score * 100)::numeric, 2)
+                THEN ROUND((le.final_total / rb.best_score * COALESCE(r.normalize_to, 100))::numeric, 2)
                 ELSE 0 END AS normalized_score
     FROM latest_entries le
-    JOIN round_best rb ON rb.round_id = le.round_id
+    JOIN round_best rb ON rb.round_id = le.round_id AND rb.team_league = le.team_league
+    JOIN rounds r ON r.id = le.round_id
     `,
-    [leagues, SUPERTEAM_LEAGUE]
+    [leagues, SUPERTEAM_LEAGUE, LEAGUES]
   );
 
   const entryMap = new Map();
   for (const e of entries) entryMap.set(`${e.team_id}:${e.round_id}`, e);
 
+  // Shared rounds appear as columns in every real league's standings.
   const roundsByLeague = new Map();
+  for (const lg of leagues) roundsByLeague.set(lg, []);
   for (const r of rounds) {
-    if (!roundsByLeague.has(r.league)) roundsByLeague.set(r.league, []);
-    roundsByLeague.get(r.league).push(r);
+    if (r.shared_across_leagues) {
+      for (const lg of leagues) {
+        if (!roundsByLeague.get(lg).some((x) => x.id === r.id)) {
+          roundsByLeague.get(lg).push(r);
+        }
+      }
+    } else if (roundsByLeague.has(r.league)) {
+      roundsByLeague.get(r.league).push(r);
+    }
+  }
+  for (const lg of leagues) {
+    roundsByLeague.get(lg).sort((a, b) => (
+      (a.sort_order - b.sort_order) || (a.round_number - b.round_number)
+    ));
   }
 
   const result = teams.map((t) => {

@@ -4,6 +4,7 @@ const { calculateTotals } = require('../rulesEngine');
 const { listScores, leaderboard } = require('../helpers/scoreQueries');
 const { getSuperTeam } = require('../helpers/superTeamQueries');
 const {
+  LEAGUES,
   SUPERTEAM_LEAGUE,
   SUPERTEAM_MIN_MEMBERS,
   SUPERTEAM_MAX_MEMBERS,
@@ -83,7 +84,10 @@ router.post('/scores', async (req, res) => {
     const { rows: teamRows } = await pool.query('SELECT * FROM teams WHERE id = $1', [team_id]);
     const team = teamRows[0];
     if (!team) return res.status(400).json({ error: 'تیم یافت نشد' });
-    if (round.league !== team.league) {
+    const sharedRound = !!round.shared_across_leagues
+      && !isSuperRound
+      && LEAGUES.includes(round.league);
+    if (round.league !== team.league && !(sharedRound && LEAGUES.includes(team.league))) {
       return res.status(400).json({ error: 'لیگ این راند با لیگ تیم مطابقت ندارد' });
     }
     participantTeamId = team.id;

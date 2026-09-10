@@ -95,6 +95,46 @@ function calcSection(items, values) {
   return { total, breakdown };
 }
 
+function findItemById(sections, itemId) {
+  if (itemId == null) return null;
+  for (const section of sections || []) {
+    const item = (section.items || []).find((i) => String(i.id) === String(itemId));
+    if (item) return { item, section };
+  }
+  return null;
+}
+
+function itemConditionMet(item, raw) {
+  if (!item) return false;
+  if (item.type === 'binary') return !!raw;
+  if (item.type === 'multi') return Array.isArray(raw) && raw.length > 0;
+  if (item.type === 'choice') return raw !== undefined && raw !== null && raw !== '';
+  if (item.type === 'scale' || item.type === 'counter') return Number(raw) > 0;
+  return false;
+}
+
+function applyPositiveMultiplier(sectionResults, factor) {
+  let final_total = 0;
+  for (const sr of Object.values(sectionResults)) {
+    const breakdown = {};
+    let total = 0;
+    for (const [key, v] of Object.entries(sr.breakdown || {})) {
+      const next = v > 0 ? v * factor : v;
+      breakdown[key] = next;
+      total += next;
+    }
+    sr.breakdown = breakdown;
+    sr.total = total;
+    final_total += total;
+  }
+  return final_total;
+}
+
+function multiplierFactor(round) {
+  const n = Number(round?.positive_score_multiplier);
+  return Number.isFinite(n) && n > 1 ? n : 0;
+}
+
 // calculateTotals(round_id, values) -> loads the round's rules from the DB,
 // runs the same per-type math that existed before, and returns a flexible
 // { [section_key]: {total, breakdown} } map plus final_total — replacing the
@@ -109,6 +149,15 @@ async function calculateTotals(round_id, values) {
     const { total, breakdown } = calcSection(section.items, v[section.key] || {});
     section_results[section.key] = { total, breakdown, label: section.label };
     final_total += total;
+  }
+
+  const factor = multiplierFactor(round);
+  const found = findItemById(sections, round.positive_multiplier_trigger_item_id);
+  if (factor && found) {
+    const raw = (v[found.section.key] || {})[found.item.key];
+    if (itemConditionMet(found.item, raw)) {
+      final_total = applyPositiveMultiplier(section_results, factor);
+    }
   }
 
   if (round.floor_negative_total_to_zero && final_total < 0) {

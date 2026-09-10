@@ -6,14 +6,82 @@ const { loadRoundRules } = require('../rulesEngine');
 
 const router = express.Router();
 
+// Factor of 1 or less (or empty) means the multiplier is off.
+function parseMultiplierFactor(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 1) return null;
+  return n;
+}
+
+// Best score in a round scales to this value (default 100).
+function parseNormalizeTo(raw, fallback = 100) {
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    const err = new Error('سقف نرمال‌سازی باید عددی بزرگ‌تر از صفر باشد');
+    err.status = 400;
+    throw err;
+  }
+  return n;
+}
+
+function parseTriggerItemId(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+async function assertTriggerBelongsToRound(triggerItemId, roundId) {
+  if (!triggerItemId || !roundId) return;
+  const { rows } = await pool.query(
+    `SELECT i.id FROM rule_items i
+     JOIN rule_sections s ON i.section_id = s.id
+     WHERE i.id = $1 AND s.round_id = $2`,
+    [triggerItemId, roundId]
+  );
+  if (!rows[0]) {
+    const err = new Error('آیتم شرط ضریب باید متعلق به همین راند باشد');
+    err.status = 400;
+    throw err;
+  }
+}
+
 // ---------- Rounds ----------
 // GET is open to any logged-in role: Admin needs the round list to enter
 // scores; only the rule-builder mutations below are Super-Admin-only.
 router.get('/rounds', async (req, res) => {
   const { league } = req.query;
-  const { rows } = league
-    ? await pool.query('SELECT * FROM rounds WHERE league = $1 ORDER BY sort_order, round_number', [league])
-    : await pool.query('SELECT * FROM rounds ORDER BY league, sort_order, round_number');
+  let rows;
+  if (!league) {
+    ({ rows } = await pool.query('SELECT * FROM rounds ORDER BY league, sort_order, round_number'));
+  } else if (league === SUPERTEAM_LEAGUE) {
+    ({ rows } = await pool.query(
+      `SELECT * FROM rounds
+       WHERE league = $1 OR is_superteam = true
+       ORDER BY sort_order, round_number`,
+      [SUPERTEAM_LEAGUE]
+    ));
+  } else if (LEAGUES.includes(league)) {
+    // Home-league rounds plus rounds marked shared from the other real league.
+    ({ rows } = await pool.query(
+      `SELECT * FROM rounds
+       WHERE COALESCE(is_superteam, false) = false
+         AND league <> $2
+         AND (
+           league = $1
+           OR (shared_across_leagues = true AND league = ANY($3::text[]))
+         )
+       ORDER BY sort_order, round_number`,
+      [league, SUPERTEAM_LEAGUE, LEAGUES]
+    ));
+  } else {
+    ({ rows } = await pool.query(
+      'SELECT * FROM rounds WHERE league = $1 ORDER BY sort_order, round_number',
+      [league]
+    ));
+  }
   res.json(rows);
 });
 
@@ -39,7 +107,8 @@ router.post('/rounds', requireRole('super_admin'), async (req, res) => {
     league, round_number, label,
     requires_timer = true, requires_captain_signature = true,
     floor_negative_total_to_zero = false, allows_multiple_tries = false,
-    scores_visible = true, is_superteam = false, sort_order,
+    scores_visible = true, is_superteam = false, shared_across_leagues = false,
+    sort_order, positive_score_multiplier, normalize_to,
   } = req.body || {};
   if (!ROUND_LEAGUES.includes(league) || !round_number) {
     return res.status(400).json({ error: 'لیگ یا شماره راند نامعتبر است' });
@@ -49,17 +118,29 @@ router.post('/rounds', requireRole('super_admin'), async (req, res) => {
   if (!superRound && !LEAGUES.includes(storedLeague)) {
     return res.status(400).json({ error: 'لیگ نامعتبر است' });
   }
+  // Shared rules only apply between the two real leagues, never سوپرتیم.
+  const shared = !superRound && !!shared_across_leagues;
+  // New rounds have no items yet, so a trigger item cannot be attached here.
+  const multiplier = parseMultiplierFactor(positive_score_multiplier);
+  let normalizeTo;
+  try {
+    normalizeTo = parseNormalizeTo(normalize_to, 100);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   try {
     const { rows } = await pool.query(
       `INSERT INTO rounds (
          league, round_number, label, requires_timer, requires_captain_signature,
-         floor_negative_total_to_zero, allows_multiple_tries, scores_visible, is_superteam, sort_order
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+         floor_negative_total_to_zero, allows_multiple_tries, scores_visible, is_superteam,
+         shared_across_leagues, sort_order, positive_score_multiplier, normalize_to
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
       [
         storedLeague, Number(round_number), label || null,
         !!requires_timer, !!requires_captain_signature, !!floor_negative_total_to_zero,
-        !!allows_multiple_tries, scores_visible !== false, superRound,
+        !!allows_multiple_tries, scores_visible !== false, superRound, shared,
         sort_order != null ? Number(sort_order) : Number(round_number),
+        multiplier, normalizeTo,
       ]
     );
     res.json(rows[0]);
@@ -86,26 +167,50 @@ router.put('/rounds/:id', requireRole('super_admin'), async (req, res) => {
     allows_multiple_tries = existing.allows_multiple_tries,
     scores_visible = existing.scores_visible,
     is_superteam = existing.is_superteam,
+    shared_across_leagues = existing.shared_across_leagues,
     sort_order = existing.sort_order,
   } = req.body || {};
 
   const superRound = !!is_superteam || existing.league === SUPERTEAM_LEAGUE;
+  const shared = !superRound && !!shared_across_leagues;
+  const multiplier = req.body?.positive_score_multiplier !== undefined
+    ? parseMultiplierFactor(req.body.positive_score_multiplier)
+    : existing.positive_score_multiplier;
+  const triggerItemId = req.body?.positive_multiplier_trigger_item_id !== undefined
+    ? parseTriggerItemId(req.body.positive_multiplier_trigger_item_id)
+    : existing.positive_multiplier_trigger_item_id;
+  let normalizeTo;
+  try {
+    normalizeTo = req.body?.normalize_to !== undefined
+      ? parseNormalizeTo(req.body.normalize_to, existing.normalize_to ?? 100)
+      : (existing.normalize_to ?? 100);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
 
   try {
+    await assertTriggerBelongsToRound(triggerItemId, req.params.id);
     const { rows } = await pool.query(
       `UPDATE rounds SET round_number=$1, label=$2, requires_timer=$3, requires_captain_signature=$4,
-        floor_negative_total_to_zero=$5, allows_multiple_tries=$6, scores_visible=$7, is_superteam=$8, sort_order=$9
-       WHERE id=$10 RETURNING *`,
+        floor_negative_total_to_zero=$5, allows_multiple_tries=$6, scores_visible=$7, is_superteam=$8,
+        shared_across_leagues=$9, sort_order=$10, positive_score_multiplier=$11,
+        positive_multiplier_trigger_item_id=$12, normalize_to=$13
+       WHERE id=$14 RETURNING *`,
       [
         Number(round_number), label, !!requires_timer, !!requires_captain_signature,
         !!floor_negative_total_to_zero, !!allows_multiple_tries, scores_visible !== false,
-        superRound, Number(sort_order), req.params.id,
+        superRound, shared, Number(sort_order), multiplier, triggerItemId, normalizeTo,
+        req.params.id,
       ]
     );
     res.json(rows[0]);
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     if (err.code === '23505') {
       return res.status(400).json({ error: 'این شماره راند برای این لیگ قبلاً ثبت شده است' });
+    }
+    if (err.code === '23503') {
+      return res.status(400).json({ error: 'آیتم شرط ضریب نامعتبر است' });
     }
     console.error('Update round failed:', err);
     res.status(500).json({ error: 'خطا در ویرایش راند' });

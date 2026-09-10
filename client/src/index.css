@@ -996,6 +996,22 @@ button:disabled {
   color: #ffd166;
 }
 
+.multiplier-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--group-head);
+  border: 1px solid var(--group-line);
+  color: var(--group-ink);
+  border-radius: var(--radius);
+  font-weight: 700;
+  font-size: 13.5px;
+}
+
 /* ---------- save row / messages ---------- */
 
 .save-row {

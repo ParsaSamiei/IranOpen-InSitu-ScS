@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { ScoreNum } from './formatScore.jsx';
-import { calcSection } from './scoreCalc.js';
+import { calcRoundTotals } from './scoreCalc.js';
 
 function ItemDetails({ item, value, onChange, readOnly }) {
   if (item.type === 'binary') {
@@ -99,8 +99,7 @@ function ItemRow({ item, value, rowScore, onChange, readOnly }) {
 
 // Sections cycle through 5 color tones (tone-0..tone-4) instead of 4 fixed
 // named ones, since the rule builder allows any number of sections per round.
-function Section({ section, index, values, onChange, readOnly }) {
-  const { total, breakdown } = useMemo(() => calcSection(section.items, values), [section.items, values]);
+function Section({ section, index, values, breakdown, total, onChange, readOnly }) {
   const tone = index % 5;
 
   return (
@@ -145,15 +144,18 @@ function Section({ section, index, values, onChange, readOnly }) {
 
 // sections: [{ key, label, items: [{key,label,type,points,options?,choices?}] }]
 // values: { [sectionKey]: { [itemKey]: value } }
-export default function ScoreForm({ sections, values, onValuesChange, readOnly }) {
+export default function ScoreForm({ sections, values, onValuesChange, readOnly, round }) {
   const v = values || {};
 
-  const final = useMemo(
-    () => (sections || []).reduce((sum, sec) => sum + calcSection(sec.items, v[sec.key] || {}).total, 0),
-    [sections, v]
+  const { sectionResults, final_total, multiplier } = useMemo(
+    () => calcRoundTotals(sections, v, round),
+    [sections, v, round]
   );
 
-  const update = (key, sectionValues) => onValuesChange({ ...v, [key]: sectionValues });
+  const update = (key, sectionValues) => {
+    if (!onValuesChange) return;
+    onValuesChange({ ...v, [key]: sectionValues });
+  };
 
   if (!sections || sections.length === 0) {
     return <p className="muted">برای این راند هنوز بخش یا آیتمی در قوانین امتیازدهی تعریف نشده است.</p>;
@@ -161,19 +163,26 @@ export default function ScoreForm({ sections, values, onValuesChange, readOnly }
 
   return (
     <div className="score-form">
+      {multiplier?.applied && (
+        <div className="multiplier-banner" role="status">
+          ضریب ×{multiplier.factor} به دلیل «{multiplier.triggerLabel}» اعمال شد
+        </div>
+      )}
       {sections.map((section, i) => (
         <Section
           key={section.key}
           section={section}
           index={i}
           values={v[section.key] || {}}
+          breakdown={sectionResults[section.key]?.breakdown || {}}
+          total={sectionResults[section.key]?.total || 0}
           onChange={(s) => update(section.key, s)}
           readOnly={readOnly}
         />
       ))}
       <div className="final-total">
         <span>امتیاز نهایی کل</span>
-        <strong><ScoreNum value={final} /></strong>
+        <strong><ScoreNum value={final_total} /></strong>
       </div>
     </div>
   );

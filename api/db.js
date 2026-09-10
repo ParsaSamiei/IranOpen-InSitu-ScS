@@ -88,6 +88,8 @@ function initDb() {
           allows_multiple_tries BOOLEAN NOT NULL DEFAULT false,
           scores_visible BOOLEAN NOT NULL DEFAULT true,
           is_superteam BOOLEAN NOT NULL DEFAULT false,
+          shared_across_leagues BOOLEAN NOT NULL DEFAULT false,
+          normalize_to REAL NOT NULL DEFAULT 100,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMP DEFAULT NOW(),
           UNIQUE (league, round_number)
@@ -186,6 +188,22 @@ function initDb() {
       await client.query(`
         ALTER TABLE rounds
         ADD COLUMN IF NOT EXISTS is_superteam BOOLEAN NOT NULL DEFAULT false
+      `);
+      await client.query(`
+        ALTER TABLE rounds
+        ADD COLUMN IF NOT EXISTS shared_across_leagues BOOLEAN NOT NULL DEFAULT false
+      `);
+      await client.query(`
+        ALTER TABLE rounds
+        ADD COLUMN IF NOT EXISTS positive_score_multiplier REAL
+      `);
+      await client.query(`
+        ALTER TABLE rounds
+        ADD COLUMN IF NOT EXISTS positive_multiplier_trigger_item_id INTEGER REFERENCES rule_items(id) ON DELETE SET NULL
+      `);
+      await client.query(`
+        ALTER TABLE rounds
+        ADD COLUMN IF NOT EXISTS normalize_to REAL NOT NULL DEFAULT 100
       `);
 
       // Expand rounds.league CHECK so the shared Superteam round can live in

@@ -7,7 +7,7 @@ import { formatRoundTime, roundTimeToSeconds, ScoreNum } from '../formatScore.js
 import { calcRoundTotals } from '../scoreCalc.js';
 import { LEAGUES, SUPERTEAM_LEAGUE, ROUND_LEAGUES } from '../constants.js';
 
-function SavedTrySheet({ tryRecord, sections, tryNumber }) {
+function SavedTrySheet({ tryRecord, sections, tryNumber, round }) {
   return (
     <section className="try-sheet try-sheet--saved">
       <header className="try-sheet-header">
@@ -20,7 +20,7 @@ function SavedTrySheet({ tryRecord, sections, tryNumber }) {
           {tryRecord.judge_name && <span>داور: {tryRecord.judge_name}</span>}
         </div>
       </header>
-      <ScoreForm sections={sections} values={tryRecord.values_json || {}} readOnly />
+      <ScoreForm sections={sections} values={tryRecord.values_json || {}} readOnly round={round} />
     </section>
   );
 }
@@ -367,6 +367,7 @@ export default function ScoreEntryTab() {
               tryRecord={t}
               sections={sections}
               tryNumber={t.try_number || i + 1}
+              round={round}
             />
           ))}
         </div>
@@ -420,7 +421,7 @@ export default function ScoreEntryTab() {
               </div>
             </>
           )}
-          <ScoreForm sections={sections} values={values} onValuesChange={setValues} />
+          <ScoreForm sections={sections} values={values} onValuesChange={setValues} round={round} />
         </div>
       )}
 

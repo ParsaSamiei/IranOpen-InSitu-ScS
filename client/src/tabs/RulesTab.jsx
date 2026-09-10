@@ -20,7 +20,11 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
   const [allows_multiple_tries, setAllowsMultipleTries] = useState(initial?.allows_multiple_tries ?? false);
   // Checkbox "مخفی کردن" is the inverse of scores_visible (default: visible).
   const [hideScores, setHideScores] = useState(initial?.scores_visible === false);
+  const [shared_across_leagues, setSharedAcrossLeagues] = useState(!!initial?.shared_across_leagues);
   const [sort_order, setSortOrder] = useState(initial?.sort_order ?? '');
+  const [normalize_to, setNormalizeTo] = useState(
+    initial?.normalize_to != null ? String(initial.normalize_to) : '100'
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const isSuperRound = league === SUPERTEAM_LEAGUE;
@@ -40,7 +44,9 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
         allows_multiple_tries,
         scores_visible: !hideScores,
         is_superteam: isSuperRound,
+        shared_across_leagues: !isSuperRound && shared_across_leagues,
         sort_order: sort_order === '' ? Number(round_number) : Number(sort_order),
+        normalize_to: normalize_to === '' ? 100 : Number(normalize_to),
       });
     } catch (err) {
       setError(err.message);
@@ -64,6 +70,20 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
           <span>ترتیب نمایش (اختیاری)</span>
           <input type="number" value={sort_order} onChange={(e) => setSortOrder(e.target.value)} placeholder={String(round_number || '')} />
         </label>
+        {!isSuperRound && (
+          <label>
+            <span>سقف نرمال‌سازی (بهترین امتیاز راند)</span>
+            <input
+              type="number"
+              min={0.01}
+              step="any"
+              value={normalize_to}
+              onChange={(e) => setNormalizeTo(e.target.value)}
+              placeholder="100"
+              required
+            />
+          </label>
+        )}
         <label className="checkbox-field">
           <input type="checkbox" checked={requires_timer} onChange={(e) => setRequiresTimer(e.target.checked)} />
           <span>این راند به تایمر نیاز دارد</span>
@@ -84,6 +104,16 @@ function RoundForm({ league, initial, onSubmit, onCancel }) {
           <input type="checkbox" checked={hideScores} onChange={(e) => setHideScores(e.target.checked)} />
           <span>مخفی کردن امتیاز این راند از عموم</span>
         </label>
+        {!isSuperRound && (
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={shared_across_leagues}
+              onChange={(e) => setSharedAcrossLeagues(e.target.checked)}
+            />
+            <span>قوانین این راند برای هر دو لیگ (مقدماتی و پیشرفته) مشترک است</span>
+          </label>
+        )}
       </div>
       {error && <p className="error">{error}</p>}
       <div className="btn-row">
@@ -213,6 +243,109 @@ function ItemRow({ item, onEdit, onDelete }) {
         <button type="button" className="link-danger" onClick={() => onDelete(item.id)}>حذف</button>
       </span>
     </div>
+  );
+}
+
+function formatMultiplier(n) {
+  const num = Number(n);
+  return Number.isFinite(num) ? String(num) : String(n);
+}
+
+function MultiplierCard({ round, sections, onSaved }) {
+  const [factor, setFactor] = useState(
+    round.positive_score_multiplier != null ? String(round.positive_score_multiplier) : ''
+  );
+  const [triggerId, setTriggerId] = useState(
+    round.positive_multiplier_trigger_item_id != null
+      ? String(round.positive_multiplier_trigger_item_id)
+      : ''
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setFactor(round.positive_score_multiplier != null ? String(round.positive_score_multiplier) : '');
+    setTriggerId(
+      round.positive_multiplier_trigger_item_id != null
+        ? String(round.positive_multiplier_trigger_item_id)
+        : ''
+    );
+    setError('');
+  }, [round.id, round.positive_score_multiplier, round.positive_multiplier_trigger_item_id]);
+
+  const hasItems = (sections || []).some((s) => (s.items || []).length > 0);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await onSaved({
+        positive_score_multiplier: factor === '' ? null : Number(factor),
+        positive_multiplier_trigger_item_id: triggerId === '' ? null : Number(triggerId),
+      });
+      setMessage('ضریب امتیاز ذخیره شد.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="card">
+      <div className="card-header">
+        <h3>ضریب امتیازهای مثبت</h3>
+      </div>
+      <p className="rule-item-type-hint">
+        اگر آیتم شرط برقرار باشد، فقط امتیازهای مثبت این راند در ضریب ضرب می‌شوند؛ امتیازهای منفی بدون تغییر می‌مانند. خالی گذاشتن ضریب یا مقدار ۱ یعنی غیرفعال.
+      </p>
+      <div className="form-grid">
+        <label>
+          <span>ضریب (مثلاً ۳)</span>
+          <input
+            type="number"
+            min={1}
+            step="any"
+            value={factor}
+            onChange={(e) => setFactor(e.target.value)}
+            placeholder="مثلاً ۳"
+          />
+        </label>
+        <label>
+          <span>آیتم شرط</span>
+          <select
+            value={triggerId}
+            onChange={(e) => setTriggerId(e.target.value)}
+            disabled={!hasItems}
+          >
+            <option value="">— انتخاب آیتم شرط —</option>
+            {(sections || []).map((section) => (
+              <optgroup key={section.id} label={section.label}>
+                {(section.items || []).map((item) => (
+                  <option key={item.id} value={item.id}>{item.label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+      </div>
+      {!hasItems && (
+        <p className="muted">پس از افزودن آیتم‌ها، آیتم شرط را از همین‌جا انتخاب کنید.</p>
+      )}
+      {factor !== '' && Number(factor) > 1 && !triggerId && (
+        <p className="muted">آیتم شرط را انتخاب کنید تا ضریب اعمال شود.</p>
+      )}
+      {error && <p className="error">{error}</p>}
+      {message && <p className="message">{message}</p>}
+      <div className="btn-row">
+        <button type="submit" className="primary" disabled={saving}>
+          {saving ? 'در حال ذخیره...' : 'ذخیره ضریب'}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -348,14 +481,25 @@ export default function RulesTab() {
               <div className={'round-list-item' + (String(r.id) === String(selectedRoundId) ? ' active' : '')} onClick={() => setSelectedRoundId(String(r.id))}>
                 <span className="round-list-item-title">{r.label || `راند ${r.round_number}`}</span>
                 <span className="round-list-item-meta">
+                  {r.shared_across_leagues && (
+                    <span className="flag-badge flag-badge--on">مشترک</span>
+                  )}
                   <span className={'flag-badge' + (r.requires_timer ? ' flag-badge--on' : '')}>تایمر {r.requires_timer ? 'الزامی' : 'غیرفعال'}</span>
                   <span className={'flag-badge' + (r.requires_captain_signature ? ' flag-badge--on' : '')}>امضا {r.requires_captain_signature ? 'الزامی' : 'غیرفعال'}</span>
                   <span className={'flag-badge' + (r.floor_negative_total_to_zero ? ' flag-badge--on' : '')}>
                     منفی → صفر {r.floor_negative_total_to_zero ? 'فعال' : 'غیرفعال'}
                   </span>
+                  {Number(r.positive_score_multiplier) > 1 && (
+                    <span className="flag-badge flag-badge--on">×{formatMultiplier(r.positive_score_multiplier)}</span>
+                  )}
                   <span className={'flag-badge' + (r.allows_multiple_tries ? ' flag-badge--on' : '')}>
                     چند تلاش {r.allows_multiple_tries ? 'فعال' : 'غیرفعال'}
                   </span>
+                  {league !== SUPERTEAM_LEAGUE && (
+                    <span className={'flag-badge' + (Number(r.normalize_to) !== 100 ? ' flag-badge--on' : '')}>
+                      نرمال → {r.normalize_to != null ? r.normalize_to : 100}
+                    </span>
+                  )}
                   <span className={'flag-badge' + (r.scores_visible === false ? ' flag-badge--on' : '')}>
                     {r.scores_visible === false ? 'امتیاز مخفی' : 'امتیاز عمومی'}
                   </span>
@@ -394,6 +538,16 @@ export default function RulesTab() {
           <div className="card-header">
             <h3>بخش‌ها و آیتم‌های «{rules.round.label || `راند ${rules.round.round_number}`}»</h3>
           </div>
+
+          <MultiplierCard
+            round={rules.round}
+            sections={rules.sections}
+            onSaved={async (payload) => {
+              await api.updateRound(rules.round.id, payload);
+              reloadRounds();
+              reloadRules();
+            }}
+          />
 
           {rules.sections.map((section) => (
             <SectionEditor key={section.id} section={section} onReload={reloadRules} />
