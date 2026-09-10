@@ -40,13 +40,17 @@ router.get('/leaderboard', async (req, res) => {
 router.post('/scores', async (req, res) => {
   const {
     team_id, super_team_id, round_id, values, judge_name, round_time_seconds,
-    captain_name, captain_signature,
+    captain_name, captain_signature, is_final_try,
   } = req.body || {};
 
   const hasTeam = team_id != null && team_id !== '';
   const hasSuper = super_team_id != null && super_team_id !== '';
   if ((!hasTeam && !hasSuper) || (hasTeam && hasSuper) || !round_id) {
     return res.status(400).json({ error: 'ورودی نامعتبر است (تیم/سوپرتیم یا راند)' });
+  }
+  const trimmedJudgeName = typeof judge_name === 'string' ? judge_name.trim() : '';
+  if (!trimmedJudgeName) {
+    return res.status(400).json({ error: 'نام داور الزامی است' });
   }
 
   const { rows: roundRows } = await pool.query('SELECT * FROM rounds WHERE id = $1', [round_id]);
@@ -57,7 +61,7 @@ router.post('/scores', async (req, res) => {
 
   let participantTeamId = null;
   let participantSuperTeamId = null;
-  let priorSigParams = [];
+  let seriesParams = [];
 
   if (hasSuper) {
     if (!isSuperRound) {
@@ -71,7 +75,7 @@ router.post('/scores', async (req, res) => {
       });
     }
     participantSuperTeamId = st.id;
-    priorSigParams = [st.id, round_id];
+    seriesParams = [st.id, round_id];
   } else {
     if (isSuperRound) {
       return res.status(400).json({ error: 'برای راند سوپرتیم باید سوپرتیم انتخاب شود' });
@@ -83,35 +87,41 @@ router.post('/scores', async (req, res) => {
       return res.status(400).json({ error: 'لیگ این راند با لیگ تیم مطابقت ندارد' });
     }
     participantTeamId = team.id;
-    priorSigParams = [team.id, round_id];
+    seriesParams = [team.id, round_id];
   }
 
-  // Captain signature: required when the round asks for it. With multiple
-  // tries, one signature covers every try for that participant+round — later
-  // tries reuse (and copy) the signature already on file.
+  // Multi-try: signature only on the final try. Intermediate tries store no
+  // signature. Once a signed try exists, the series is closed.
+  const isFinalTry = !round.allows_multiple_tries || !!is_final_try;
   let resolvedCaptainName = captain_name || null;
-  let resolvedCaptainSignature = captain_signature || null;
+  let resolvedCaptainSignature = null;
 
-  if (round.allows_multiple_tries && !resolvedCaptainSignature) {
-    const priorSql = hasSuper
-      ? `SELECT captain_name, captain_signature FROM score_entries
+  if (round.allows_multiple_tries) {
+    const closedSql = hasSuper
+      ? `SELECT id FROM score_entries
          WHERE super_team_id = $1 AND round_id = $2
            AND captain_signature IS NOT NULL AND captain_signature <> ''
-         ORDER BY created_at ASC, id ASC
          LIMIT 1`
-      : `SELECT captain_name, captain_signature FROM score_entries
+      : `SELECT id FROM score_entries
          WHERE team_id = $1 AND round_id = $2
            AND captain_signature IS NOT NULL AND captain_signature <> ''
-         ORDER BY created_at ASC, id ASC
          LIMIT 1`;
-    const { rows: priorSig } = await pool.query(priorSql, priorSigParams);
-    if (priorSig[0]) {
-      resolvedCaptainSignature = priorSig[0].captain_signature;
-      if (!resolvedCaptainName) resolvedCaptainName = priorSig[0].captain_name;
+    const { rows: closedRows } = await pool.query(closedSql, seriesParams);
+    if (closedRows[0]) {
+      return res.status(400).json({
+        error: 'تلاش‌های این راند با امضای نهایی بسته شده و ثبت تلاش جدید ممکن نیست',
+      });
     }
   }
 
-  if (round.requires_captain_signature && !resolvedCaptainSignature) {
+  if (isFinalTry) {
+    resolvedCaptainSignature = captain_signature || null;
+  } else {
+    // Intermediate multi-try: never persist a signature, even if the client sent one.
+    resolvedCaptainSignature = null;
+  }
+
+  if (round.requires_captain_signature && isFinalTry && !resolvedCaptainSignature) {
     return res.status(400).json({
       error: hasSuper
         ? 'برای ثبت این راند، امضای کاپیتان سوپرتیم الزامی است'
@@ -139,7 +149,7 @@ router.post('/scores', async (req, res) => {
       [
         participantTeamId, participantSuperTeamId, round_id,
         JSON.stringify(values || {}), JSON.stringify(section_totals), totals.final_total,
-        timeSeconds, judge_name || null, resolvedCaptainName, resolvedCaptainSignature, req.user?.sub || null,
+        timeSeconds, trimmedJudgeName, resolvedCaptainName, resolvedCaptainSignature, req.user?.sub || null,
       ]
     );
     res.json({ id: rows[0].id, section_totals, final_total: totals.final_total });
@@ -154,6 +164,14 @@ router.put('/scores/:id', async (req, res) => {
   const { rows: existingRows } = await pool.query('SELECT * FROM score_entries WHERE id = $1', [req.params.id]);
   const existing = existingRows[0];
   if (!existing) return res.status(404).json({ error: 'رکورد یافت نشد' });
+
+  let resolvedJudgeName = existing.judge_name;
+  if (judge_name != null) {
+    resolvedJudgeName = typeof judge_name === 'string' ? judge_name.trim() : '';
+    if (!resolvedJudgeName) {
+      return res.status(400).json({ error: 'نام داور الزامی است' });
+    }
+  }
 
   const timeSeconds = round_time_seconds != null && round_time_seconds !== ''
     ? Math.max(0, Number(round_time_seconds) || 0)
@@ -171,7 +189,7 @@ router.put('/scores/:id', async (req, res) => {
        WHERE id=$9`,
       [
         JSON.stringify(values || {}), JSON.stringify(section_totals), totals.final_total,
-        judge_name != null ? judge_name : existing.judge_name,
+        resolvedJudgeName,
         timeSeconds,
         captain_name != null ? captain_name : existing.captain_name,
         captain_signature != null ? captain_signature : existing.captain_signature,

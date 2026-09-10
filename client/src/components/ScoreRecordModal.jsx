@@ -28,12 +28,16 @@ export default function ScoreRecordModal({ mode, record, onClose, onSaved, publi
   const [error, setError] = useState('');
 
   const save = async () => {
+    if (!judgeName.trim()) {
+      setError('لطفا نام داور را وارد کنید');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       await api.updateScore(record.id, {
         values,
-        judge_name: judgeName,
+        judge_name: judgeName.trim(),
         round_time_seconds: roundTimeToSeconds(minutes, seconds, tenths),
       });
       onSaved();
@@ -70,7 +74,7 @@ export default function ScoreRecordModal({ mode, record, onClose, onSaved, publi
           {!publicMode && (
             <label>
               <span>نام داور</span>
-              <input value={judgeName} onChange={(e) => setJudgeName(e.target.value)} placeholder="اختیاری" disabled={readOnly} />
+              <input value={judgeName} onChange={(e) => setJudgeName(e.target.value)} placeholder="نام داور" disabled={readOnly} required />
             </label>
           )}
         </div>

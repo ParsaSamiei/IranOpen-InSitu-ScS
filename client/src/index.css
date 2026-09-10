@@ -665,6 +665,27 @@ button:disabled {
   gap: 8px;
   align-items: flex-start;
 }
+.final-try-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--navy);
+  cursor: pointer;
+}
+.final-try-toggle input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.signature-skip-hint {
+  margin-bottom: 18px;
+}
 .signature-readonly-name {
   display: flex;
   align-items: center;

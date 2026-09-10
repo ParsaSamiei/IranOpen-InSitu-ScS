@@ -50,6 +50,8 @@ export default function ScoreEntryTab() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [captainName, setCaptainName] = useState('');
   const [captainSignature, setCaptainSignature] = useState(null);
+  // Multi-try rounds: signature only on the final try (not intermediate ones).
+  const [isFinalTry, setIsFinalTry] = useState(false);
 
   // Round timer: start/stop stopwatch that auto-fills the minute/second/tenth
   // boxes above. The boxes stay editable by hand once the timer is stopped.
@@ -102,8 +104,9 @@ export default function ScoreEntryTab() {
     return list;
   }, [existingTriesRaw]);
 
-  const sharedSignatureTry = existingTries.find((t) => t.captain_signature);
-  const hasSharedSignature = !!sharedSignatureTry?.captain_signature;
+  // A signed try marks the series as finished — no more tries after that.
+  const finalSignedTry = existingTries.find((t) => t.captain_signature);
+  const seriesComplete = !!finalSignedTry?.captain_signature;
   const nextTryNumber = existingTries.length + 1;
 
   useEffect(() => {
@@ -144,17 +147,16 @@ export default function ScoreEntryTab() {
 
   const previewTotals = useMemo(() => calcRoundTotals(sections, values, round), [sections, values, round]);
 
-  const clearSheetFields = ({ keepSignature = false } = {}) => {
+  const clearSheetFields = () => {
     setValues({});
     setRoundMinutes('');
     setRoundSeconds('');
     setRoundTenths('');
     setTimerRunning(false);
     setElapsedMs(0);
-    if (!keepSignature) {
-      setCaptainName('');
-      setCaptainSignature(null);
-    }
+    setCaptainName('');
+    setCaptainSignature(null);
+    setIsFinalTry(false);
   };
 
   // Reset everything (including participant) whenever the league/mode changes.
@@ -190,14 +192,18 @@ export default function ScoreEntryTab() {
       return;
     }
     if (!roundId) { setMessage('لطفا راند را انتخاب کنید'); return; }
+    if (!judge.trim()) { setMessage('لطفا نام داور را وارد کنید'); return; }
     setMessage('');
+    setIsFinalTry(false);
+    setCaptainName('');
+    setCaptainSignature(null);
     setConfirmOpen(true);
   };
 
   const needsSignature = !!round?.requires_captain_signature;
   const needsTimer = !!round?.requires_timer;
-  // Multi-try: signature once for the participant+round; later tries reuse it.
-  const needsSignatureNow = needsSignature && !(allowsMultipleTries && hasSharedSignature);
+  // Multi-try: only the last (final) try collects a signature; intermediate tries skip it.
+  const needsSignatureNow = needsSignature && (!allowsMultipleTries || isFinalTry);
 
   const save = async () => {
     if (needsSignatureNow && !captainSignature) {
@@ -214,25 +220,33 @@ export default function ScoreEntryTab() {
         ...(isSuperMode ? { super_team_id: superTeamId } : { team_id: teamId }),
         round_id: roundId,
         values,
-        judge_name: judge,
+        judge_name: judge.trim(),
         round_time_seconds: needsTimer ? (round_time_seconds || 0) : null,
-        captain_name: needsSignatureNow ? captainName : (captainName || sharedSignatureTry?.captain_name || null),
-        captain_signature: needsSignatureNow ? captainSignature : (captainSignature || null),
+        captain_name: needsSignatureNow
+          ? captainName
+          : (allowsMultipleTries && needsSignature ? null : (captainName || null)),
+        captain_signature: needsSignatureNow ? captainSignature : null,
+        is_final_try: allowsMultipleTries ? isFinalTry : undefined,
       });
+      const savedAsFinal = allowsMultipleTries && isFinalTry;
       setMessage(allowsMultipleTries
-        ? `تلاش ${nextTryNumber} ذخیره شد ✔ می‌توانید تلاش بعدی را پایین صفحه ثبت کنید.`
+        ? (savedAsFinal
+          ? `تلاش ${nextTryNumber} (نهایی) ذخیره شد ✔`
+          : `تلاش ${nextTryNumber} ذخیره شد ✔ می‌توانید تلاش بعدی را پایین صفحه ثبت کنید.`)
         : 'امتیاز با موفقیت ذخیره شد ✔');
       setConfirmOpen(false);
       if (allowsMultipleTries) {
-        clearSheetFields({ keepSignature: true });
+        clearSheetFields();
         try {
           await reloadTries();
         } catch {
           // Score already saved; list refresh failure shouldn't look like a save error.
         }
-        requestAnimationFrame(() => {
-          newTryAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
+        if (!savedAsFinal) {
+          requestAnimationFrame(() => {
+            newTryAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        }
       } else {
         clearSheetFields();
         advanceToNextRound();
@@ -244,7 +258,8 @@ export default function ScoreEntryTab() {
     }
   };
 
-  const showForm = !rulesLoading && sections.length > 0 && (!allowsMultipleTries || participantSelected);
+  const showForm = !rulesLoading && sections.length > 0
+    && (!allowsMultipleTries || (participantSelected && !seriesComplete));
 
   return (
     <div className="tab-content">
@@ -298,13 +313,16 @@ export default function ScoreEntryTab() {
         )}
         <label className="entry-field">
           <span className="entry-field-label">نام داور</span>
-          <input value={judge} onChange={(e) => setJudge(e.target.value)} placeholder="اختیاری" />
+          <input value={judge} onChange={(e) => setJudge(e.target.value)} placeholder="نام داور" required />
         </label>
       </div>
 
       {allowsMultipleTries && (
         <p className="try-mode-hint">
-          این راند چند تلاش کامل دارد؛ بهترین امتیاز (و در صورت تساوی کمترین زمان) در رده‌بندی لحاظ می‌شود. امضای کاپیتان فقط یک‌بار برای همه تلاش‌ها لازم است.
+          این راند چند تلاش کامل دارد؛ بهترین امتیاز (و در صورت تساوی کمترین زمان) در رده‌بندی لحاظ می‌شود.
+          {needsSignature
+            ? ' امضای کاپیتان فقط برای آخرین تلاش لازم است.'
+            : ''}
         </p>
       )}
 
@@ -352,6 +370,13 @@ export default function ScoreEntryTab() {
             />
           ))}
         </div>
+      )}
+
+      {allowsMultipleTries && participantSelected && seriesComplete && (
+        <p className="try-mode-hint">
+          تلاش‌های این راند با امضای نهایی بسته شده است
+          {finalSignedTry?.try_number != null ? ` (تلاش ${finalSignedTry.try_number})` : ''}.
+        </p>
       )}
 
       {allowsMultipleTries && !participantSelected && sections.length > 0 && (
@@ -433,6 +458,23 @@ export default function ScoreEntryTab() {
               <div className="confirm-final"><dt>امتیاز نهایی</dt><dd><ScoreNum value={previewTotals.final_total} /></dd></div>
             </dl>
 
+            {allowsMultipleTries && needsSignature && (
+              <label className="final-try-toggle">
+                <input
+                  type="checkbox"
+                  checked={isFinalTry}
+                  onChange={(e) => {
+                    setIsFinalTry(e.target.checked);
+                    if (!e.target.checked) {
+                      setCaptainName('');
+                      setCaptainSignature(null);
+                    }
+                  }}
+                />
+                <span>این آخرین تلاش است (امضای {captainLabel} لازم است)</span>
+              </label>
+            )}
+
             {needsSignatureNow ? (
               <div className="signature-block">
                 <label className="signature-name-label">
@@ -441,20 +483,15 @@ export default function ScoreEntryTab() {
                 </label>
                 <p className="confirm-hint">
                   {allowsMultipleTries
-                    ? `این امضا برای همه تلاش‌های این ${isSuperMode ? 'سوپرتیم' : 'تیم'} در این راند معتبر است.`
+                    ? `${captainLabel} با امضای زیر، صحت همه تلاش‌های این راند را تایید می‌کند.`
                     : `${captainLabel} با امضای زیر، صحت امتیازهای ثبت‌شده در این راند را تایید می‌کند.`}
                 </p>
                 <SignaturePad value={captainSignature} onChange={setCaptainSignature} />
               </div>
-            ) : needsSignature && hasSharedSignature ? (
-              <div className="signature-block signature-block-readonly">
-                <div className="signature-readonly-name">
-                  <span>{captainLabel}</span>
-                  <strong>{sharedSignatureTry.captain_name || '—'}</strong>
-                </div>
-                <img src={sharedSignatureTry.captain_signature} alt={`امضای ${captainLabel}`} className="signature-preview" />
-                <span className="signature-hint">امضا قبلاً برای تلاش‌های این راند ثبت شده است</span>
-              </div>
+            ) : allowsMultipleTries && needsSignature ? (
+              <p className="confirm-hint signature-skip-hint">
+                برای تلاش‌های میانی امضا لازم نیست. اگر این آخرین تلاش است، گزینه بالا را فعال کنید.
+              </p>
             ) : (
               <div className="signature-block">
                 <label className="signature-name-label">
